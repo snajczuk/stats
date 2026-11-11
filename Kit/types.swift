@@ -77,6 +77,19 @@ public let CombinedModulesSpacings: [KeyValue_t] = [
     KeyValue_t(key: "8", value: "8", additional: 8)
 ]
 
+// icon shown in the menu bar when combined modules display an icon instead of widgets
+// key "app" is the Stats logo, every other key is an SF Symbol name
+public let CombinedModulesIcons: [KeyValue_t] = [
+    KeyValue_t(key: "app", value: "Stats logo"),
+    KeyValue_t(key: "ticks", value: "Summary"),
+    KeyValue_t(key: "switch.2", value: "Toggles"),
+    KeyValue_t(key: "wifi", value: "Wi-Fi"),
+    KeyValue_t(key: "gauge.with.dots.needle.67percent", value: "Gauge"),
+    KeyValue_t(key: "chart.bar.xaxis", value: "Chart"),
+    KeyValue_t(key: "square.grid.2x2", value: "Grid"),
+    KeyValue_t(key: "cpu", value: "Chip")
+]
+
 public let PublicIPAddressRefreshIntervals: [KeyValue_t] = [
     KeyValue_t(key: "never", value: "Never"),
     KeyValue_t(key: "separator", value: "separator"),
@@ -314,6 +327,7 @@ public extension Notification.Name {
     static let pause = Notification.Name("pause")
     static let toggleFanControl = Notification.Name("toggleFanControl")
     static let combinedModulesPopup = Notification.Name("combinedModulesPopup")
+    static let combinedSummaryChanged = Notification.Name("combinedSummaryChanged")
     static let remoteLoginSuccess = Notification.Name("remoteLoginSuccess")
     static let remoteState = Notification.Name("remoteState")
     static let remoteAuthenticated = Notification.Name("remoteAuthenticated")

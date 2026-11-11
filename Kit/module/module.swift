@@ -82,6 +82,10 @@ open class Module {
     public var menuBar: MenuBar
     public var window: Window? = nil
     public let portal: Portal_p?
+    // one-line summary used by the compact list mode of the combined popup
+    public let compact: CompactPortalRow
+    // whether the module fills `compact` with values (modules with a portal do by default)
+    open var compactSupported: Bool { self.portal != nil }
     
     public var name: String { config.name }
     public var combinedPosition: Int {
@@ -121,6 +125,7 @@ open class Module {
         self.moduleType = moduleType
         self.portal = portal
         self.config = module_c(in: Bundle(for: type(of: self)).path(forResource: "config", ofType: "plist")!)
+        self.compact = CompactPortalRow(name: self.config.name, icon: self.config.icon)
         
         self.log = NextLog.shared.copy(category: self.config.name)
         self.settingsView = settings

@@ -135,11 +135,36 @@ public class Battery: Module {
         return !sources.isEmpty
     }
     
+    private func compactCallback(_ value: Battery_Usage) {
+        let level = Int((abs(value.level) * 100).rounded())
+        var symbol: String
+        switch level {
+        case ..<13: symbol = "battery.0"
+        case ..<38: symbol = "battery.25"
+        case ..<63: symbol = "battery.50"
+        case ..<88: symbol = "battery.75"
+        default: symbol = "battery.100"
+        }
+        var status: String? = nil
+        if value.isCharging {
+            symbol = "battery.100.bolt"
+            status = localizedString("Charging")
+        } else if !value.isBatteryPowered {
+            status = localizedString("Plugged in")
+        }
+        self.compact.setIcon(symbol: symbol)
+        self.compact.setValue("\(level)%", subtitle: status)
+        CombinedSummary.shared.update {
+            $0.battery = .init(level: abs(value.level), charging: value.isCharging, pluggedIn: !value.isBatteryPowered)
+        }
+    }
+    
     private func usageCallback(_ raw: Battery_Usage?) {
         guard let value = raw, self.enabled else { return }
         
         self.popupView.usageCallback(value)
         self.portalView.loadCallback(value)
+        self.compactCallback(value)
         self.notificationsView.usageCallback(value)
         
         self.menuBar.widgets.filter{ $0.isActive }.forEach { (w: SWidget) in

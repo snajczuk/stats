@@ -90,6 +90,8 @@ public class Bluetooth: Module {
     private let settingsView: Settings = Settings()
     private let notificationsView: Notifications
     
+    public override var compactSupported: Bool { true }
+    
     public init() {
         self.notificationsView = Notifications(.bluetooth)
         
@@ -121,6 +123,13 @@ public class Bluetooth: Module {
             self.settingsView.setList(active)
             self.notificationsView.callback(active)
         })
+        
+        let connected = active.filter { $0.isConnected }
+        switch connected.count {
+        case 0: self.compact.setValue(localizedString("No devices"))
+        case 1: self.compact.setValue("1 \(localizedString("device"))", subtitle: connected[0].name)
+        default: self.compact.setValue("\(connected.count) \(localizedString("devices"))", subtitle: connected.map { $0.name }.joined(separator: ", "))
+        }
         
         var list: [Stack_t] = []
         active.forEach { (d: BLEDevice) in

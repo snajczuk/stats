@@ -112,13 +112,28 @@ public class PopupWindow: NSPanel, NSWindowDelegate {
         self.collectionBehavior = .moveToActiveSpace
         self.backgroundColor = .clear
         self.hasShadow = true
+        // same level as system menu bar dropdowns, so it opens above notifications
+        self.level = .popUpMenu
         self.setIsVisible(false)
         self.delegate = self
+        // without a header there's no close button, so a dragged (pinned) popup couldn't be dismissed
+        if module == .combined {
+            self.isMovable = false
+        }
     }
     
     public func windowWillMove(_ notification: Notification) {
         self.viewController.setCloseButton(true)
         self.locked = true
+        // a popup dragged out and pinned shouldn't cover menus and notifications
+        self.level = .floating
+    }
+    
+    public override func setIsVisible(_ flag: Bool) {
+        if !flag {
+            self.level = .popUpMenu
+        }
+        super.setIsVisible(flag)
     }
     
     public func windowDidResignKey(_ notification: Notification) {
@@ -183,8 +198,12 @@ internal class PopupViewController: NSViewController {
 internal class PopupView: NSView {
     private var view: Popup_p? = nil
     
-    private var foreground: NSVisualEffectView
+    private var foreground: NSView
     private var background: NSView
+    // true when the popup sits on Liquid Glass instead of the white/blur background
+    private let glass: Bool
+    // the combined popup has no header; its actions live in a footer inside its own view
+    private let headerHeight: CGFloat
     
     private let header: HeaderView
     private let body: NSScrollView
@@ -196,6 +215,7 @@ internal class PopupView: NSView {
     private var containerHeight: CGFloat?
     
     init(frame: NSRect, module: ModuleType) {
+        self.headerHeight = module == .combined ? 0 : Constants.Popup.headerHeight
         self.header = HeaderView(frame: NSRect(
             x: 0,
             y: frame.height - Constants.Popup.headerHeight,
@@ -211,17 +231,30 @@ internal class PopupView: NSView {
         self.windowHeight = NSScreen.main?.visibleFrame.height
         self.containerHeight = self.body.documentView?.frame.height
         
-        self.foreground = NSVisualEffectView(frame: frame)
-        self.foreground.material = .titlebar
-        self.foreground.blendingMode = .behindWindow
-        self.foreground.state = .active
-        self.foreground.wantsLayer = true
-        self.foreground.layer?.backgroundColor = NSColor.red.cgColor
-        self.foreground.layer?.cornerRadius = 6
+        // popups use the system glass material on macOS 26+, older systems keep the classic look
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView(frame: frame)
+            glass.style = .regular
+            glass.cornerRadius = 16
+            self.foreground = glass
+            self.glass = true
+        } else {
+            let blur = NSVisualEffectView(frame: frame)
+            blur.material = .titlebar
+            blur.blendingMode = .behindWindow
+            blur.state = .active
+            blur.wantsLayer = true
+            blur.layer?.backgroundColor = NSColor.red.cgColor
+            blur.layer?.cornerRadius = 6
+            self.foreground = blur
+            self.glass = false
+        }
         
         self.background = NSView(frame: frame)
         self.background.wantsLayer = true
-        self.foreground.addSubview(self.background)
+        if !self.glass {
+            self.foreground.addSubview(self.background)
+        }
         
         super.init(frame: frame)
         
@@ -234,7 +267,14 @@ internal class PopupView: NSView {
         self.body.horizontalScrollElasticity = .none
         
         self.addSubview(self.foreground, positioned: .below, relativeTo: .none)
-        self.addSubview(self.header)
+        if self.headerHeight > 0 {
+            self.addSubview(self.header)
+        } else {
+            // with no header covering the title bar area, the scroll view would push its content
+            // down by the title bar height, leaving a gap on top and forcing a scroll bar
+            self.body.automaticallyAdjustsContentInsets = false
+            self.body.contentInsets = NSEdgeInsetsZero
+        }
         self.addSubview(self.body)
     }
     
@@ -252,7 +292,7 @@ internal class PopupView: NSView {
         var isScrollVisible: Bool = false
         var size: NSSize = NSSize(
             width: (view?.frame.width ?? Constants.Popup.width) + (Constants.Popup.margins*2),
-            height: (view?.frame.height ?? 0) + Constants.Popup.headerHeight + (Constants.Popup.margins*2)
+            height: (view?.frame.height ?? 0) + self.headerHeight + (Constants.Popup.margins*2)
         )
         
         self.windowHeight = NSScreen.main?.visibleFrame.height // for height recalculate when appear/disappear
@@ -269,7 +309,7 @@ internal class PopupView: NSView {
         self.foreground.setFrameSize(size)
         self.background.setFrameSize(size)
         self.resizeBody(size, scrollVisible: isScrollVisible)
-        self.header.setFrameOrigin(NSPoint(x: 0, y: size.height - Constants.Popup.headerHeight))
+        self.header.setFrameOrigin(NSPoint(x: 0, y: size.height - self.headerHeight))
         
         if let view = view {
             self.body.documentView = view
@@ -312,7 +352,7 @@ internal class PopupView: NSView {
         var isScrollVisible: Bool = false
         var windowSize: NSSize = NSSize(
             width: size.width + (Constants.Popup.margins*2),
-            height: size.height + Constants.Popup.headerHeight + (Constants.Popup.margins*2)
+            height: size.height + self.headerHeight + (Constants.Popup.margins*2)
         )
         let h0 = self.containerHeight ?? 0
         
@@ -351,7 +391,7 @@ internal class PopupView: NSView {
             x: Constants.Popup.margins - (isRTL ? offset : 0),
             y: Constants.Popup.margins,
             width: windowSize.width - (Constants.Popup.margins*2) + offset,
-            height: windowSize.height - Constants.Popup.headerHeight - (Constants.Popup.margins*2)
+            height: windowSize.height - self.headerHeight - (Constants.Popup.margins*2)
         )
     }
 }
@@ -373,6 +413,12 @@ internal class HeaderView: NSStackView {
         
         super.init(frame: CGRect(x: frame.origin.x, y: frame.origin.y, width: frame.width, height: frame.height))
         
+        // on glass the light gray buttons wash out, so use the plain text color (black or white)
+        var buttonColor: NSColor = .lightGray
+        if #available(macOS 26.0, *) {
+            buttonColor = .labelColor
+        }
+        
         self.orientation = .horizontal
         self.distribution = .gravityAreas
         self.spacing = 0
@@ -383,7 +429,7 @@ internal class HeaderView: NSStackView {
         activity.bezelStyle = .regularSquare
         activity.translatesAutoresizingMaskIntoConstraints = false
         activity.imageScaling = .scaleNone
-        activity.contentTintColor = .lightGray
+        activity.contentTintColor = buttonColor
         activity.isBordered = false
         activity.target = self
         activity.focusRingType = .none
@@ -410,7 +456,7 @@ internal class HeaderView: NSStackView {
         settings.translatesAutoresizingMaskIntoConstraints = false
         settings.imageScaling = .scaleNone
         settings.image = iconFromSymbol(name: "command", scale: .large)
-        settings.contentTintColor = .lightGray
+        settings.contentTintColor = buttonColor
         settings.isBordered = false
         settings.action = #selector(self.openSettings)
         settings.target = self

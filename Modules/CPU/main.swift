@@ -199,6 +199,8 @@ public class CPU: Module {
         
         self.popupView.loadCallback(value)
         self.portalView.callback(value)
+        self.compact.setValue("\(Int((value.totalUsage * 100).rounded()))%")
+        CombinedSummary.shared.pushCPU(value.totalUsage)
         self.notificationsView.loadCallback(value)
         self.previewView.loadCallback(value)
         

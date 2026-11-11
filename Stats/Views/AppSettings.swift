@@ -42,6 +42,14 @@ class ApplicationSettings: NSStackView {
         get { Store.shared.bool(key: "CombinedModules_popup", defaultValue: true) }
         set { Store.shared.set(key: "CombinedModules_popup", value: newValue) }
     }
+    private var combinedModulesIconSymbol: String {
+        get { Store.shared.string(key: "CombinedModules_iconSymbol", defaultValue: "app") }
+        set { Store.shared.set(key: "CombinedModules_iconSymbol", value: newValue) }
+    }
+    private var combinedModulesCompact: Bool {
+        get { Store.shared.bool(key: "CombinedModules_compact", defaultValue: false) }
+        set { Store.shared.set(key: "CombinedModules_compact", value: newValue) }
+    }
     
     private var systemWidgetsUpdatesState: Bool {
         get {
@@ -139,6 +147,11 @@ class ApplicationSettings: NSStackView {
                 action: #selector(self.toggleCombinedModulesIcon),
                 state: self.combinedModulesIcon
             )),
+            PreferencesRow(localizedString("Icon"), component: selectView(
+                action: #selector(self.toggleCombinedModulesIconSymbol),
+                items: CombinedModulesIcons,
+                selected: self.combinedModulesIconSymbol
+            )),
             PreferencesRow(component: self.moduleSelector),
             PreferencesRow(localizedString("Spacing"), component: selectView(
                 action: #selector(self.toggleCombinedModulesSpacing),
@@ -152,6 +165,10 @@ class ApplicationSettings: NSStackView {
             PreferencesRow(localizedString("Combined details"), component: switchView(
                 action: #selector(self.toggleCombinedModulesPopup),
                 state: self.combinedModulesPopup
+            )),
+            PreferencesRow(localizedString("Compact list"), component: switchView(
+                action: #selector(self.toggleCombinedModulesCompact),
+                state: self.combinedModulesCompact
             ))
         ])
         scrollView.stackView.addArrangedSubview(self.combinedModulesView!)
@@ -384,9 +401,12 @@ class ApplicationSettings: NSStackView {
     
     private func updateCombinedModulesSettings() {
         self.combinedModulesView?.setRowVisibility(1, newState: self.combinedModulesState)
-        for row in 2...5 {
+        self.combinedModulesView?.setRowVisibility(2, newState: self.combinedModulesState && self.combinedModulesIcon)
+        for row in 3...6 {
             self.combinedModulesView?.setRowVisibility(row, newState: self.combinedModulesState && !self.combinedModulesIcon)
         }
+        // the compact list only matters when clicking opens the combined popup
+        self.combinedModulesView?.setRowVisibility(7, newState: self.combinedModulesState && (self.combinedModulesIcon || self.combinedModulesPopup))
     }
     
     @objc private func toggleCombinedModulesIcon(_ sender: NSButton) {
@@ -408,6 +428,18 @@ class ApplicationSettings: NSStackView {
     
     @objc private func toggleCombinedModulesPopup(_ sender: NSButton) {
         self.combinedModulesPopup = sender.state == NSControl.StateValue.on
+        self.updateCombinedModulesSettings()
+        NotificationCenter.default.post(name: .combinedModulesPopup, object: nil, userInfo: nil)
+    }
+    
+    @objc private func toggleCombinedModulesIconSymbol(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        self.combinedModulesIconSymbol = key
+        NotificationCenter.default.post(name: .moduleRearrange, object: nil, userInfo: nil)
+    }
+    
+    @objc private func toggleCombinedModulesCompact(_ sender: NSButton) {
+        self.combinedModulesCompact = sender.state == NSControl.StateValue.on
         NotificationCenter.default.post(name: .combinedModulesPopup, object: nil, userInfo: nil)
     }
     

@@ -1518,11 +1518,20 @@ internal func restoreNSStatusItemPosition(id: String) {
 public class AppIcon: NSImageView {
     public static let size: CGSize = CGSize(width: 16, height: 16)
     
-    public init() {
+    // symbol: an SF Symbol name to show instead of the Stats logo ("app" or nil keeps the logo)
+    public init(symbol: String? = nil) {
         super.init(frame: NSRect(x: 0, y: 3, width: AppIcon.size.width, height: AppIcon.size.height))
         
-        self.image = NSImage(named: NSImage.Name("MenuBarIcon"))
         self.imageScaling = .scaleProportionallyDown
+        if let symbol, symbol != "app",
+           let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)) {
+            image.isTemplate = true
+            self.image = image
+            self.contentTintColor = .labelColor
+        } else {
+            self.image = NSImage(named: NSImage.Name("MenuBarIcon"))
+        }
     }
     
     required init?(coder: NSCoder) {

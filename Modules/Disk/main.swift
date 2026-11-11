@@ -304,6 +304,7 @@ public class Disk: Module {
         }
         
         self.portalView.utilizationCallback(d)
+        self.compact.setValue("\(Int((d.percentage * 100).rounded()))%", subtitle: value.count > 1 ? d.mediaName : nil)
         self.notificationsView.utilizationCallback(d.percentage)
         
         self.menuBar.widgets.filter{ $0.isActive }.forEach { (w: SWidget) in

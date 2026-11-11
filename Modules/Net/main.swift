@@ -253,6 +253,7 @@ public class Network: Module {
         
         self.popupView.usageCallback(value)
         self.portalView.usageCallback(value)
+        self.compactCallback(value)
         self.notificationsView.usageCallback(value)
         self.previewView.usageCallback(value)
         
@@ -350,6 +351,38 @@ public class Network: Module {
         
         if self.systemWidgetsUpdatesState {
             SystemWidgetUpdates.shared.update(raw, key: "Network@UsageReader", kinds: [Network_entry.kind], defaults: self.userDefaults)
+        }
+    }
+    
+    private func compactCallback(_ value: Network_Usage) {
+        let down = Units(bytes: value.bandwidth.download).getReadableSpeed()
+        let up = Units(bytes: value.bandwidth.upload).getReadableSpeed()
+        
+        var subtitle: String? = nil
+        var symbol: String? = "network"
+        switch value.connectionType {
+        case .wifi:
+            symbol = "wifi"
+            subtitle = value.wifiDetails.ssid ?? localizedString("Wi-Fi")
+        case .ethernet:
+            symbol = nil // drawn glyph below
+            subtitle = localizedString("Ethernet")
+        case .bluetooth:
+            subtitle = localizedString("Bluetooth")
+        default:
+            if !value.status { symbol = "wifi.slash" }
+        }
+        if !value.status { subtitle = localizedString("Not connected") }
+        
+        if value.status && symbol == nil {
+            self.compact.setIcon(glyph: .ethernet, active: true)
+        } else {
+            self.compact.setIcon(symbol: symbol ?? "network", active: value.status)
+        }
+        self.compact.setValue("↓\(down) ↑\(up)", subtitle: subtitle)
+        CombinedSummary.shared.update {
+            $0.network = .init(upload: value.bandwidth.upload, download: value.bandwidth.download,
+                               connected: value.status, wifi: value.connectionType == .wifi)
         }
     }
     

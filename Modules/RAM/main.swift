@@ -156,6 +156,14 @@ public class RAM: Module {
         
         self.popupView.loadCallback(value)
         self.portalView.callback(value)
+        self.compact.setValue("\(Int((value.usage * 100).rounded()))%")
+        let pressure: Int
+        switch value.pressure.value {
+        case .normal: pressure = 1
+        case .warning: pressure = 2
+        case .critical: pressure = 3
+        }
+        CombinedSummary.shared.update { $0.memory = .init(usage: value.usage, pressure: pressure) }
         self.notificationsView.loadCallback(value)
         self.previewView.loadCallback(value)
         
