@@ -88,6 +88,24 @@ internal class Popup: PopupWrapper {
     private var jitter: [Double] = []
     
     public var locationPermissionAction: (() -> Void)?
+    
+    // inline (combined dropdown) only
+    private var inline: Bool = false
+    private var inlineWifiRows: [NSView] = []
+    private var inlineInterfaceField: NSTextField? = nil
+    private var inlineWifiField: NSTextField? = nil
+    private var inlineSignalField: NSTextField? = nil
+    private var inlineStatusField: NSTextField? = nil
+    private var inlineStatusRow: NSView? = nil
+    private var inlineLatencyField: NSTextField? = nil
+    private var inlineLatencyRow: NSView? = nil
+    private var inlineTotalField: NSTextField? = nil
+    private var inlineInterfaceRow: NSView? = nil
+    private var localIPView: NSView? = nil
+    private weak var copiedField: NSTextField? = nil
+    private var copiedUntil: Date = .distantPast
+    private var inlineLink: Bool? = nil     // interface is up
+    private var inlineInternet: Bool? = nil // internet reachable; nil until checked
     private var locationPermissionButton: NSButton?
     
     private var base: DataSizeBase {
@@ -120,8 +138,10 @@ internal class Popup: PopupWrapper {
         return value
     }
     
-    public init(_ module: ModuleType) {
+    // inline: only the two interface sections and the address, for the combined dropdown
+    public init(_ module: ModuleType, inline: Bool = false) {
         super.init(module, frame: NSRect(x: 0, y: 0, width: Constants.Popup.width, height: 0))
+        self.inline = inline
         
         self.spacing = 0
         self.orientation = .vertical
@@ -137,15 +157,23 @@ internal class Popup: PopupWrapper {
         self.interfaceDetailsState = Store.shared.bool(key: "\(self.title)_interfaceDetails", defaultValue: self.interfaceDetailsState)
         self.emojiCCState = Store.shared.bool(key: "\(self.title)_emojiCC", defaultValue: self.emojiCCState)
         
-        self.addArrangedSubview(self.initDashboard())
-        self.addArrangedSubview(self.initChart())
-        self.addArrangedSubview(self.initConnectivityChart())
-        self.addArrangedSubview(self.initDetails())
-        self.addArrangedSubview(self.initInterface())
-        self.addArrangedSubview(self.initAddress())
-        self.addArrangedSubview(self.initProcesses())
+        if !inline {
+            self.addArrangedSubview(self.initDashboard())
+            self.addArrangedSubview(self.initChart())
+            self.addArrangedSubview(self.initConnectivityChart())
+        }
+        // inline drops the section headings (and the buttons on them)
+        self.addArrangedSubview(inline ? self.initInlineDetails() : self.initDetails())
+        self.addArrangedSubview(inline ? self.initInlineInterface() : self.initInterface())
+        self.addArrangedSubview(self.initAddress(titled: !inline))
+        if inline {
+            self.setUpCopyableAddresses()
+        }
+        if !inline {
+            self.addArrangedSubview(self.initProcesses())
+        }
         
-        if !self.publicIPState {
+        if !self.publicIPState && !inline {
             self.addressView?.removeFromSuperview()
         }
         
@@ -166,7 +194,7 @@ internal class Popup: PopupWrapper {
         var h: CGFloat = 0
         self.arrangedSubviews.forEach { v in
             if let v = v as? NSStackView {
-                h += v.arrangedSubviews.map({ $0.bounds.height }).reduce(0, +)
+                h += v.arrangedSubviews.filter({ !$0.isHidden }).map({ $0.bounds.height }).reduce(0, +)
             } else {
                 h += v.bounds.height
             }
@@ -333,19 +361,233 @@ internal class Popup: PopupWrapper {
         return view
     }
     
-    private func initAddress() -> NSView {
+    // Status (link and internet in one), latency with jitter, and both totals in one row.
+    // Rows with nothing known are hidden.
+    private func initInlineDetails() -> NSView {
         let view = NSStackView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 0))
         view.orientation = .vertical
         view.spacing = 0
         
-        view.addArrangedSubview(SeparatorView(
-            label: localizedString("Address"),
-            button: PopupButton(toolTip: localizedString("Refresh"), icon: "arrow.clockwise") { [weak self] in
-                self?.refreshPublicIP()
-            }
-        ))
+        let status = popupRow(view, title: "\(localizedString("Status")):", value: "")
+        self.inlineStatusField = status.1
+        self.inlineStatusRow = status.2
+        status.2.isHidden = true
+        let latency = popupRow(view, title: "\(localizedString("Latency")):", value: "")
+        self.inlineLatencyField = latency.1
+        latency.1.toolTip = localizedString("Average latency ± jitter")
+        self.inlineLatencyRow = latency.2
+        latency.2.isHidden = true
+        let total = popupRow(view, title: "\(localizedString("Total")):", value: "")
+        self.totalUploadLabel = total.0 // carries the "last reset" tooltip
+        self.inlineTotalField = total.1
         
-        self.localIPField = popupRow(view, title: "\(localizedString("Local IP")):", value: localizedString("Unknown")).1
+        return view
+    }
+    
+    // shows or hides a row; returns whether that changed
+    @discardableResult
+    private func setRow(_ row: NSView?, hidden: Bool) -> Bool {
+        guard let row, row.isHidden != hidden else { return false }
+        row.isHidden = hidden
+        return true
+    }
+    
+    // Clicking an IP address copies it (without the flag or country code) and briefly
+    // shows "Copied" in its place.
+    private func setUpCopyableAddresses() {
+        for (row, field) in [(self.localIPView, self.localIPField), (self.publicIPv4View, self.publicIPv4Field), (self.publicIPv6View, self.publicIPv6Field)] {
+            guard let row, let field else { continue }
+            field.isSelectable = false
+            row.toolTip = localizedString("Click to copy")
+            row.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(self.copyAddress(_:))))
+        }
+    }
+    
+    @objc private func copyAddress(_ sender: NSClickGestureRecognizer) {
+        guard let field = sender.view?.subviews.compactMap({ $0 as? ValueField }).first, self.canWrite(field) else { return }
+        let text = field.stringValue
+        guard !isUnknownValue(text), let address = text.split(separator: " ").first else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(String(address), forType: .string)
+        
+        self.copiedField = field
+        self.copiedUntil = Date().addingTimeInterval(1.2)
+        field.stringValue = localizedString("Copied")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak field] in
+            if field?.stringValue == localizedString("Copied") {
+                field?.stringValue = text
+            }
+        }
+    }
+    
+    // false while a field is showing "Copied", so updates don't cut it short
+    private func canWrite(_ field: NSTextField?) -> Bool {
+        guard let field, field === self.copiedField else { return true }
+        return Date() >= self.copiedUntil
+    }
+    
+    // Three rows instead of six: interface with its link speed, then on Wi-Fi only the
+    // generation with security, and signal with channel. No network name or physical
+    // address: the row above already names the network.
+    private func initInlineInterface() -> NSView {
+        let view = NSStackView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 0))
+        view.orientation = .vertical
+        view.spacing = 0
+        
+        let interface = popupRow(view, title: "\(localizedString("Interface")):", value: localizedString("Unknown"))
+        self.inlineInterfaceField = interface.1
+        self.inlineInterfaceRow = interface.2
+        let wifi = popupRow(view, title: "\(localizedString("Wi-Fi")):", value: localizedString("Unknown"))
+        let signal = popupRow(view, title: "\(localizedString("Signal")):", value: localizedString("Unknown"))
+        self.inlineWifiField = wifi.1
+        self.inlineSignalField = signal.1
+        self.inlineWifiRows = [wifi.2, signal.2]
+        self.inlineWifiRows.forEach({ $0.isHidden = true })
+        
+        self.interfaceView = view
+        return view
+    }
+    
+    // One status from the link and internet checks, after a colored dot:
+    // Online (green), No internet (orange), Disconnected (red), or Connected (gray) before
+    // the internet check has reported.
+    private func renderInlineStatus() {
+        guard let field = self.inlineStatusField else { return }
+        let text: String
+        let color: NSColor
+        switch (self.inlineLink, self.inlineInternet) {
+        case (false, _):
+            text = "Disconnected"; color = .systemRed
+        case (true, true):
+            text = "Online"; color = .systemGreen
+        case (true, false):
+            text = "No internet"; color = .systemOrange
+        case (true, nil):
+            text = "Connected"; color = .secondaryLabelColor
+        case (nil, _):
+            field.stringValue = ""
+            if self.setRow(self.inlineStatusRow, hidden: true) { self.recalculateHeight() }
+            return
+        }
+        if self.setRow(self.inlineStatusRow, hidden: false) { self.recalculateHeight() }
+        // styled text ignores the field's own alignment, so carry it over
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = field.alignment
+        let font = field.font ?? NSFont.systemFont(ofSize: 12)
+        let value = NSMutableAttributedString(string: "● ", attributes: [.foregroundColor: color, .font: font, .paragraphStyle: paragraph])
+        value.append(NSAttributedString(string: localizedString(text), attributes: [.foregroundColor: field.textColor ?? NSColor.labelColor, .font: font, .paragraphStyle: paragraph]))
+        field.attributedStringValue = value
+    }
+    
+    // "1201 Mbps", or "1.2 Gbps" from 1000 up
+    private func linkSpeed(_ mbps: Double) -> String? {
+        guard mbps > 0 else { return nil }
+        if mbps >= 1000 {
+            return "\((mbps / 1000).rounded(toPlaces: 1)) Gbps"
+        }
+        return "\(Int(mbps.rounded())) Mbps"
+    }
+    
+    // marketing name for the 802.11 standard, e.g. 802.11ax is Wi-Fi 6
+    private func wifiGeneration(_ standard: String?) -> String? {
+        switch standard {
+        case "802.11be": return "Wi-Fi 7"
+        case "802.11ax": return "Wi-Fi 6"
+        case "802.11ac": return "Wi-Fi 5"
+        case "802.11n": return "Wi-Fi 4"
+        case nil, "none", "unknown": return nil
+        default: return standard
+        }
+    }
+    
+    // Wi-Fi rows and DNS servers for the inline layout; returns whether the height changed
+    private func renderInline(_ value: Network_Usage) -> Bool {
+        var resized = false
+        
+        let wifi = value.connectionType == .wifi
+        let unknown = localizedString("Unknown")
+        func join(_ parts: [String?]) -> String {
+            let list = parts.compactMap({ $0 }).filter({ !$0.isEmpty && $0 != "unknown" && $0 != "none" })
+            return list.isEmpty ? unknown : list.joined(separator: " · ")
+        }
+        
+        // Wi-Fi (en0) · 1.2 Gbps
+        if let interface = value.interface {
+            self.inlineInterfaceField?.stringValue = join(["\(interface.displayName) (\(interface.BSDName))", self.linkSpeed(interface.transmitRate)])
+        } else {
+            self.inlineInterfaceField?.stringValue = unknown
+        }
+        
+        if wifi {
+            let details = value.wifiDetails
+            // Wi-Fi 6 · WPA3 Personal
+            self.inlineWifiField?.stringValue = join([self.wifiGeneration(details.standard), details.security])
+            self.inlineWifiField?.toolTip = details.standard
+            // -41 dBm · Ch 36, 5 GHz, 80 MHz
+            var channel: String? = nil
+            if let number = details.channelNumber {
+                channel = ["\(localizedString("Ch")) \(number)", details.channelBand, details.channelWidth]
+                    .compactMap({ $0 }).filter({ $0 != "unknown" }).joined(separator: ", ")
+            }
+            self.inlineSignalField?.stringValue = join([details.RSSI.map { "\($0) dBm" }, channel])
+            self.inlineSignalField?.toolTip = details.noise.map { "\(localizedString("Noise")): \($0) dBm" }
+        }
+        // Wi-Fi rows only on Wi-Fi, and like every row here, only when something is known
+        for (row, field) in zip(self.inlineWifiRows, [self.inlineWifiField, self.inlineSignalField]) {
+            resized = self.setRow(row, hidden: !wifi || isUnknownValue(field?.stringValue ?? "")) || resized
+        }
+        resized = self.setRow(self.inlineInterfaceRow, hidden: isUnknownValue(self.inlineInterfaceField?.stringValue ?? "")) || resized
+        resized = self.setRow(self.localIPView, hidden: isUnknownValue(self.localIPField?.stringValue ?? "")) || resized
+        
+        // ↑ 1.2 GB · ↓ 8.4 GB
+        self.inlineTotalField?.stringValue = "↑ \(Units(bytes: value.total.upload).getReadableMemory()) · ↓ \(Units(bytes: value.total.download).getReadableMemory())"
+        
+        // DNS servers, kept as the last row of the address section
+        guard let address = self.addressView else { return resized }
+        if value.dns.isEmpty {
+            if let view = self.dnsServersView, view.superview != nil {
+                view.removeFromSuperview()
+                resized = true
+            }
+        } else {
+            let servers = value.dns.joined(separator: "\n")
+            if self.dnsServersField == nil || value.dns.count != self.dnsServersField?.stringValue.split(separator: "\n").count {
+                self.dnsServersView?.removeFromSuperview()
+                let row = popupRow(address, title: "\(localizedString("DNS Server")):", value: servers, multiline: true)
+                self.dnsServersField = row.1
+                self.dnsServersView = row.2
+                self.dnsServersField?.isSelectable = true
+                resized = true
+            }
+            if self.dnsServersField?.stringValue != servers {
+                self.dnsServersField?.stringValue = servers
+            }
+            if let view = self.dnsServersView, address.arrangedSubviews.last !== view {
+                view.removeFromSuperview()
+                address.addArrangedSubview(view)
+                resized = true
+            }
+        }
+        return resized
+    }
+    
+    private func initAddress(titled: Bool = true) -> NSView {
+        let view = NSStackView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 0))
+        view.orientation = .vertical
+        view.spacing = 0
+        
+        if titled {
+            view.addArrangedSubview(SeparatorView(
+                label: localizedString("Address"),
+                button: PopupButton(toolTip: localizedString("Refresh"), icon: "arrow.clockwise") { [weak self] in
+                    self?.refreshPublicIP()
+                }
+            ))
+        }
+        
+        let local = popupRow(view, title: "\(localizedString("Local IP")):", value: localizedString("Unknown"))
+        self.localIPField = local.1
+        self.localIPView = local.2
         
         let ipV4 = popupRow(view, title: "\(localizedString("Public IP")):", value: localizedString("Unknown"))
         let ipV6 = popupRow(view, title: "\(localizedString("Public IP")):", value: localizedString("Unknown"))
@@ -531,7 +773,7 @@ internal class Popup: PopupWrapper {
         } else if let v6 = value.laddr.v6, !v6.isEmpty {
             privateIP = v6
         }
-        if self.localIPField?.stringValue != privateIP {
+        if self.localIPField?.stringValue != privateIP && self.canWrite(self.localIPField) {
             self.localIPField?.stringValue = privateIP
         }
         
@@ -550,7 +792,7 @@ internal class Popup: PopupWrapper {
                     }
                     self.publicIPv4Field?.toolTip = cc
                 }
-                if self.publicIPv4Field?.stringValue != ip {
+                if self.publicIPv4Field?.stringValue != ip && self.canWrite(self.publicIPv4Field) {
                     self.publicIPv4Field?.stringValue = ip
                 }
             } else if view.superview != nil {
@@ -575,7 +817,7 @@ internal class Popup: PopupWrapper {
                     }
                     self.publicIPv6Field?.toolTip = cc
                 }
-                if self.publicIPv6Field?.stringValue != ip {
+                if self.publicIPv6Field?.stringValue != ip && self.canWrite(self.publicIPv6Field) {
                     self.publicIPv6Field?.stringValue = ip
                 }
             } else if view.superview != nil {
@@ -585,7 +827,9 @@ internal class Popup: PopupWrapper {
             }
         }
         
-        if self.interfaceDetailsState {
+        if self.inline {
+            resized = self.renderInline(value) || resized
+        } else if self.interfaceDetailsState {
             if !value.dns.isEmpty {
                 let servers = value.dns.joined(separator: "\n")
                 
@@ -611,6 +855,10 @@ internal class Popup: PopupWrapper {
         }
         
         self.statusField?.setStatus(value.status)
+        if self.inline {
+            self.inlineLink = value.status
+            self.renderInlineStatus()
+        }
         
         if resized {
             self.recalculateHeight()
@@ -653,6 +901,23 @@ internal class Popup: PopupWrapper {
         self.jitterField?.stringValue = jitter
         
         self.connectivityField?.setStatus(value?.status)
+        if self.inline {
+            self.inlineInternet = value?.status
+            self.renderInlineStatus()
+            
+            // 18 ms ± 3 ms, only while online
+            var text: String? = nil
+            if let v = value, v.status, !self.latency.isEmpty {
+                let avg = self.latency.reduce(0, +) / Double(self.latency.count)
+                text = "\(Int(avg.rounded())) ms"
+                if !self.jitter.isEmpty {
+                    let j = self.jitter.reduce(0, +) / Double(self.jitter.count)
+                    text! += " ± \(Int(j.rounded())) ms"
+                }
+            }
+            self.inlineLatencyField?.stringValue = text ?? ""
+            if self.setRow(self.inlineLatencyRow, hidden: text == nil) { self.recalculateHeight() }
+        }
         self.connectivityChart?.display()
     }
     
@@ -677,6 +942,10 @@ internal class Popup: PopupWrapper {
     
     public func resetConnectivityView() {
         self.connectivityField?.setStatus(nil)
+        if self.inline {
+            self.inlineInternet = nil
+            self.renderInlineStatus()
+        }
     }
     
     // MARK: - Settings
@@ -900,6 +1169,7 @@ internal class Popup: PopupWrapper {
     }
     
     private func setUploadDownloadFields() {
+        guard self.uploadView != nil, self.downloadView != nil else { return } // inline has no dashboard
         let upload = Units(bytes: self.uploadValue).getReadableTuple(base: self.base, unit: self.speedUnit)
         let download = Units(bytes: self.downloadValue).getReadableTuple(base: self.base, unit: self.speedUnit)
         

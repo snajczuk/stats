@@ -44,6 +44,13 @@ internal class Popup: PopupWrapper {
     
     private let loadCache = PopupCache<RAM_Usage>()
     
+    // inline (combined dropdown) only
+    private var inline: Bool = false
+    private var inlineStack: NSStackView? = nil
+    private var inlineUsedField: NSTextField? = nil
+    private var inlineSwapRow: NSView? = nil
+
+    
     private var processes: ProcessesView? = nil
     
     private var numberOfProcesses: Int {
@@ -69,7 +76,8 @@ internal class Popup: PopupWrapper {
     private var chartColorState: SColor = .systemAccent
     private var chartColor: NSColor { self.chartColorState.additional as? NSColor ?? NSColor.systemBlue }
     
-    public init(_ module: ModuleType) {
+    // inline: a short set of rows around the usage bar, for the combined dropdown
+    public init(_ module: ModuleType, inline: Bool = false) {
         super.init(module, frame: NSRect(
             x: 0,
             y: 0,
@@ -86,6 +94,15 @@ internal class Popup: PopupWrapper {
         self.lineChartHistory = Store.shared.int(key: "\(self.title)_lineChartHistory", defaultValue: self.lineChartHistory)
         self.lineChartScale = Scale.fromString(Store.shared.string(key: "\(self.title)_lineChartScale", defaultValue: self.lineChartScale.key))
         self.lineChartFixedScale = Double(Store.shared.int(key: "\(self.title)_lineChartFixedScale", defaultValue: 100)) / 100
+        
+        self.inline = inline
+        if inline {
+            self.orientation = .vertical
+            self.spacing = 0
+            self.addArrangedSubview(self.initInlineDetails())
+            self.inlineRecalculateHeight()
+            return
+        }
         
         let gridView: NSGridView = NSGridView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: self.frame.height))
         gridView.rowSpacing = 0
@@ -224,6 +241,52 @@ internal class Popup: PopupWrapper {
         return view
     }
     
+    // Used "of" total in one row (free is just the rest), the bar with its legend,
+    // swap only while it's in use, and pressure.
+    private func initInlineDetails() -> NSView {
+        let view = NSStackView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 0))
+        view.orientation = .vertical
+        view.alignment = .width
+        view.spacing = 0
+        
+        self.inlineUsedField = popupRow(view, title: "\(localizedString("Used")):", value: "").1
+        self.bar.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        view.addArrangedSubview(self.bar)
+        (self.appColorView, _, self.appField) = popupWithColorRow(view, color: self.appColor, title: "\(localizedString("App")):", value: "")
+        (self.wiredColorView, _, self.wiredField) = popupWithColorRow(view, color: self.wiredColor, title: "\(localizedString("Wired")):", value: "")
+        (self.compressedColorView, _, self.compressedField) = popupWithColorRow(view, color: self.compressedColor, title: "\(localizedString("Compressed")):", value: "")
+        let swap = popupRow(view, title: "\(localizedString("Swap")):", value: "")
+        self.swapField = swap.1
+        self.inlineSwapRow = swap.2
+        swap.2.isHidden = true
+        self.pressureField = popupRow(view, title: "\(localizedString("Memory pressure")):", value: "").1
+        
+        self.inlineStack = view
+        return view
+    }
+    
+    // rows are 22 high and the bar 16; hidden rows take no space
+    private func inlineRecalculateHeight() {
+        guard let stack = self.inlineStack else { return }
+        let h = stack.arrangedSubviews.filter({ !$0.isHidden }).map({ $0 === self.bar ? 16 : $0.frame.height }).reduce(0, +)
+        if self.frame.height != h {
+            self.setFrameSize(NSSize(width: self.frame.width, height: h))
+            self.sizeCallback?(self.frame.size)
+        }
+    }
+    
+    private func renderInline(_ value: RAM_Usage) {
+        let used = Units(bytes: Int64(value.used)).getReadableMemory(style: .memory)
+        let total = Units(bytes: Int64(value.total)).getReadableMemory(style: .memory)
+        self.inlineUsedField?.stringValue = "\(used) \(localizedString("of")) \(total)"
+        
+        let swapHidden = value.swap.used <= 0
+        if let row = self.inlineSwapRow, row.isHidden != swapHidden {
+            row.isHidden = swapHidden
+            self.inlineRecalculateHeight()
+        }
+    }
+    
     private func initProcesses() -> NSView  {
         if self.numberOfProcesses == 0 { return NSView() }
         
@@ -276,6 +339,10 @@ internal class Popup: PopupWrapper {
         self.level?.display()
         
         self.bar.setValues(values)
+        
+        if self.inline {
+            self.renderInline(value)
+        }
         
         self.chart?.display()
     }

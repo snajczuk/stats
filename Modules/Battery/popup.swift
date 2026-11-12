@@ -46,6 +46,13 @@ internal class Popup: PopupWrapper {
     private var processesInitialized: Bool = false
     
     private let usageCache = PopupCache<Battery_Usage>()
+    // inline: only the key metrics, for the combined dropdown
+    private let inline: Bool
+    private var inlineAdapterRow: NSView? = nil
+    private var inlineSourceRow: NSView? = nil
+    private var inlineTimeRow: NSView? = nil
+    private var inlinePowerField: NSTextField? = nil
+    private var inlineHealthField: NSTextField? = nil
     
     private var numberOfProcesses: Int {
         Store.shared.int(key: "\(self.title)_processes", defaultValue: 8)
@@ -57,11 +64,18 @@ internal class Popup: PopupWrapper {
         Store.shared.string(key: "\(self.title)_timeFormat", defaultValue: "short")
     }
     
-    public init(_ module: ModuleType) {
+    public init(_ module: ModuleType, inline: Bool = false) {
+        self.inline = inline
         super.init(module, frame: NSRect(x: 0, y: 0, width: Constants.Popup.width, height: 0))
         
         self.spacing = 0
         self.orientation = .vertical
+        
+        if inline {
+            self.addArrangedSubview(self.initInline())
+            self.recalculateHeight()
+            return
+        }
         
         self.addArrangedSubview(self.initDashboard())
         self.addArrangedSubview(self.initChart())
@@ -89,7 +103,7 @@ internal class Popup: PopupWrapper {
         var h: CGFloat = 0
         self.arrangedSubviews.forEach { v in
             if let v = v as? NSStackView {
-                h += v.arrangedSubviews.map({ $0.fittingSize.height }).reduce(0, +)
+                h += v.arrangedSubviews.filter({ !$0.isHidden }).map({ $0.fittingSize.height }).reduce(0, +)
             } else {
                 h += v.fittingSize.height
             }
@@ -182,6 +196,62 @@ internal class Popup: PopupWrapper {
         self.timeField = time.1
         
         return view
+    }
+    
+    // Source, time left (with the clock time it ends), power with current, adapter power
+    // while plugged in, and health with cycles.
+    // Rows with nothing known are hidden.
+    private func initInline() -> NSView {
+        let view = NSStackView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 0))
+        view.orientation = .vertical
+        view.spacing = 0
+        
+        let source = popupRow(view, title: "\(localizedString("Source")):", value: localizedString("Unknown"))
+        self.sourceField = source.1
+        self.inlineSourceRow = source.2
+        let time = popupRow(view, title: "\(localizedString("Time to discharge")):", value: localizedString("Unknown"))
+        self.timeLabelField = time.0
+        self.timeField = time.1
+        self.inlineTimeRow = time.2
+        self.inlinePowerField = popupRow(view, title: "\(localizedString("Power")):", value: "").1
+        // only while plugged in
+        let adapter = popupRow(view, title: "\(localizedString("Adapter power")):", value: "0 W")
+        self.adapterPowerField = adapter.1
+        adapter.2.isHidden = true
+        self.inlineAdapterRow = adapter.2
+        self.inlineHealthField = popupRow(view, title: "\(localizedString("Health")):", value: "").1
+        
+        return view
+    }
+    
+    private func renderInline(_ value: Battery_Usage) {
+        // 12.4 W · 1050 mA
+        self.inlinePowerField?.stringValue = "\(abs(value.batteryPower).roundTo(decimalPlaces: 2)) W · \(abs(value.current)) mA"
+        // 92% · 312 cycles
+        self.inlineHealthField?.stringValue = "\(value.health)% · \(value.cycles) \(localizedString("cycles"))"
+        
+        // add the clock time it runs out or fills up: "1:20 · full at 3:45 PM"
+        let minutes = value.isBatteryPowered ? value.timeToEmpty : value.timeToCharge
+        if minutes > 0 && !value.isCharged && !value.optimizedChargingEngaged, let field = self.timeField {
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            formatter.dateStyle = .none
+            let end = formatter.string(from: Date().addingTimeInterval(Double(minutes) * 60))
+            field.stringValue += " · " + (value.isBatteryPowered ? "\(localizedString("until")) \(end)" : "\(localizedString("full at")) \(end)")
+        }
+        
+        var changed = false
+        for (row, field) in [(self.inlineSourceRow, self.sourceField), (self.inlineTimeRow, self.timeField)] {
+            guard let row, let field else { continue }
+            let hidden = isUnknownValue(field.stringValue)
+            if row.isHidden != hidden {
+                row.isHidden = hidden
+                changed = true
+            }
+        }
+        if changed {
+            self.recalculateHeight()
+        }
     }
     
     private func initBattery() -> NSView {
@@ -343,7 +413,7 @@ internal class Popup: PopupWrapper {
                 self.timeField?.stringValue = localizedString("Unknown")
             }
             
-            if self.adapterView == nil {
+            if self.adapterView == nil && !self.inline {
                 var index: Int = 3
                 if let section = self.batterySection, let i = self.arrangedSubviews.firstIndex(of: section) {
                     index = i + 1
@@ -365,6 +435,11 @@ internal class Popup: PopupWrapper {
             self.adapterCurrentField?.toolTip = "\(localizedString("Charging")): \(value.chargingCurrent) mA"
             self.adapterVoltageField?.stringValue = "\(value.adapterVoltage.roundTo(decimalPlaces: 2)) V"
             self.adapterVoltageField?.toolTip = "\(localizedString("Charging")): \((Double(value.chargingVoltage)/1000).roundTo(decimalPlaces: 2)) V"
+        }
+        
+        if let row = self.inlineAdapterRow, row.isHidden != value.isBatteryPowered {
+            row.isHidden = value.isBatteryPowered
+            self.recalculateHeight()
         }
         
         self.powerField?.stringValue = "\(abs(value.batteryPower).roundTo(decimalPlaces: 2)) W"
@@ -390,6 +465,10 @@ internal class Popup: PopupWrapper {
             self.temperatureField?.stringValue = temperature(value)
         } else {
             self.temperatureField?.stringValue = localizedString("Unavailable")
+        }
+        
+        if self.inline {
+            self.renderInline(value)
         }
     }
     

@@ -71,6 +71,8 @@ struct UPS_Usage: Codable {
 
 public class Battery: Module {
     private let popupView: Popup
+    private let inlineView: Popup = Popup(.battery, inline: true)
+    public override var compactDetails: PopupWrapper? { self.inlineView }
     private let settingsView: Settings
     private let portalView: Portal
     private let notificationsView: Notifications
@@ -163,6 +165,7 @@ public class Battery: Module {
         guard let value = raw, self.enabled else { return }
         
         self.popupView.usageCallback(value)
+        self.inlineView.usageCallback(value)
         self.portalView.loadCallback(value)
         self.compactCallback(value)
         self.notificationsView.usageCallback(value)

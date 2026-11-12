@@ -79,6 +79,12 @@ internal class Popup: PopupWrapper {
     private var sliderView: NSView? = nil
     
     private var lineChart: LineChartView? = nil
+    
+    // inline (combined dropdown) only
+    private var inline: Bool = false
+    private var inlineUsageField: NSTextField? = nil
+    private var inlineThermalField: NSTextField? = nil
+
     private var columnChart: ColumnChartView? = nil
     private var circle: PieChartView? = nil
     private var temperatureCircle: PieChartView? = nil
@@ -134,7 +140,8 @@ internal class Popup: PopupWrapper {
         return value
     }
     
-    public init(_ module: ModuleType) {
+    // inline: the per-core chart and a short set of rows, for the combined dropdown
+    public init(_ module: ModuleType, inline: Bool = false) {
         super.init(module, frame: NSRect(x: 0, y: 0, width: Constants.Popup.width, height: 0))
         
         self.spacing = 0
@@ -150,6 +157,16 @@ internal class Popup: PopupWrapper {
         self.lineChartHistory = Store.shared.int(key: "\(self.title)_lineChartHistory", defaultValue: self.lineChartHistory)
         self.lineChartScale = Scale.fromString(Store.shared.string(key: "\(self.title)_lineChartScale", defaultValue: self.lineChartScale.key))
         self.lineChartFixedScale = Double(Store.shared.int(key: "\(self.title)_lineChartFixedScale", defaultValue: 100)) / 100
+        
+        self.inline = inline
+        if inline {
+            if let chart = self.initCoresChart() {
+                self.addArrangedSubview(chart)
+            }
+            self.addArrangedSubview(self.initInlineDetails())
+            self.recalculateHeight()
+            return
+        }
         
         self.addArrangedSubview(self.initDashboard())
         self.addArrangedSubview(self.initChart())
@@ -185,7 +202,7 @@ internal class Popup: PopupWrapper {
         var h: CGFloat = 0
         self.arrangedSubviews.forEach { v in
             if let v = v as? NSStackView {
-                h += v.arrangedSubviews.map({ $0.bounds.height + v.spacing }).reduce(0, +)
+                h += v.arrangedSubviews.filter({ !$0.isHidden }).map({ $0.bounds.height + v.spacing }).reduce(0, +)
             } else {
                 h += v.bounds.height
             }
@@ -254,30 +271,32 @@ internal class Popup: PopupWrapper {
         view.addArrangedSubview(separator)
         view.addArrangedSubview(lineChartContainer)
         
-        if let cores = SystemKit.shared.device.info.cpu?.logicalCores {
-            let barChartContainer: NSView = {
-                let box: NSView = NSView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 50))
-                box.heightAnchor.constraint(equalToConstant: box.frame.height).isActive = true
-                box.wantsLayer = true
-                box.layer?.backgroundColor = NSColor.lightGray.withAlphaComponent(0.1).cgColor
-                box.layer?.cornerRadius = 3
-                
-                let chart = ColumnChartView(frame: NSRect(
-                    x: Constants.Popup.spacing,
-                    y: Constants.Popup.spacing,
-                    width: view.frame.width - (Constants.Popup.spacing*2),
-                    height: box.frame.height - (Constants.Popup.spacing*2)
-                ), num: Int(cores))
-                self.columnChart = chart
-                
-                box.addSubview(chart)
-                
-                return box
-            }()
+        if let barChartContainer = self.initCoresChart() {
             view.addArrangedSubview(barChartContainer)
         }
         
         return view
+    }
+    
+    // one column per core, colored by core type
+    private func initCoresChart() -> NSView? {
+        guard let cores = SystemKit.shared.device.info.cpu?.logicalCores else { return nil }
+        let box: NSView = NSView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 50))
+        box.heightAnchor.constraint(equalToConstant: box.frame.height).isActive = true
+        box.wantsLayer = true
+        box.layer?.backgroundColor = NSColor.lightGray.withAlphaComponent(0.1).cgColor
+        box.layer?.cornerRadius = 3
+        
+        let chart = ColumnChartView(frame: NSRect(
+            x: Constants.Popup.spacing,
+            y: Constants.Popup.spacing,
+            width: self.frame.width - (Constants.Popup.spacing*2),
+            height: box.frame.height - (Constants.Popup.spacing*2)
+        ), num: Int(cores))
+        self.columnChart = chart
+        
+        box.addSubview(chart)
+        return box
     }
     
     private func initDetails() -> NSView {
@@ -317,6 +336,48 @@ internal class Popup: PopupWrapper {
         view.addSubview(container)
         
         return view
+    }
+    
+    // Inline rows: core load by type (their colors match the chart above), system and user
+    // load in one row (idle is just what's left) and thermal state.
+    private func initInlineDetails() -> NSView {
+        let view = NSStackView(frame: NSRect(x: 0, y: 0, width: self.frame.width, height: 0))
+        view.orientation = .vertical
+        view.spacing = 0
+        
+        if SystemKit.shared.device.info.cpu?.eCores != nil {
+            (self.eCoresColorView, _, self.eCoresField) = popupWithColorRow(view, color: self.eCoresColor, title: "\(localizedString("Efficiency cores")):", value: "")
+        }
+        if SystemKit.shared.device.info.cpu?.pCores != nil {
+            (self.pCoresColorView, _, self.pCoresField) = popupWithColorRow(view, color: self.pCoresColor, title: "\(localizedString("Performance cores")):", value: "")
+        }
+        if SystemKit.shared.device.info.cpu?.sCores != nil {
+            (self.sCoresColorView, _, self.sCoresField) = popupWithColorRow(view, color: self.sCoresColor, title: "\(localizedString("Super cores")):", value: "")
+        }
+        self.inlineUsageField = popupRow(view, title: "\(localizedString("Usage")):", value: "").1
+        if !isARM {
+            self.shedulerLimitField = popupRow(view, title: "\(localizedString("Scheduler limit")):", value: "").1
+            self.speedLimitField = popupRow(view, title: "\(localizedString("Speed limit")):", value: "").1
+        }
+        let thermal = popupRow(view, title: "\(localizedString("Thermal state")):", value: "")
+        self.inlineThermalField = thermal.1
+        thermal.1.toolTip = localizedString("Whether macOS is slowing the Mac down to keep it cool")
+        
+        return view
+    }
+    
+    private func renderInline(_ value: CPU_Load) {
+        self.inlineUsageField?.stringValue = "\(localizedString("System")) \(Int(value.systemLoad.rounded(toPlaces: 2) * 100))% · \(localizedString("User")) \(Int(value.userLoad.rounded(toPlaces: 2) * 100))%"
+        
+        let thermal: String
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: thermal = "Normal"
+        case .fair: thermal = "Warm"
+        case .serious: thermal = "Throttled"
+        case .critical: thermal = "Critical"
+        @unknown default: thermal = "Unknown"
+        }
+        self.inlineThermalField?.stringValue = localizedString(thermal)
     }
     
     private func initAverage() -> NSView {
@@ -431,6 +492,10 @@ internal class Popup: PopupWrapper {
         }
         self.columnChart?.setValues(usagePerCore)
         self.columnChart?.display()
+        
+        if self.inline {
+            self.renderInline(value)
+        }
         
         self.lineChart?.display()
     }

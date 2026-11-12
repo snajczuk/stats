@@ -86,6 +86,8 @@ open class Module {
     public let compact: CompactPortalRow
     // whether the module fills `compact` with values (modules with a portal do by default)
     open var compactSupported: Bool { self.portal != nil }
+    // key metrics shown under the module's row in a summary item's dropdown (nil for none)
+    open var compactDetails: PopupWrapper? { nil }
     
     public var name: String { config.name }
     public var combinedPosition: Int {

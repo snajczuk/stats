@@ -122,10 +122,30 @@ internal class UsageReader: Reader<Network_Usage>, CWEventDelegate, CLLocationMa
         }
     }
     
+    // Looking up the primary interface is a call to another process, and this is read many
+    // times per update, so the answer is reused for a second.
     private var interfaceID: String {
-        get { Store.shared.string(key: "Network_interface", defaultValue: self.primaryInterface) }
-        set { Store.shared.set(key: "Network_interface", value: newValue) }
+        get {
+            let now = ProcessInfo.processInfo.systemUptime
+            self.interfaceIDLock.lock()
+            defer { self.interfaceIDLock.unlock() }
+            if let cached = self.cachedInterfaceID, now - cached.at < 1 {
+                return cached.value
+            }
+            let key = "Network_interface"
+            let value = Store.shared.exist(key: key) ? Store.shared.string(key: key, defaultValue: "") : self.primaryInterface
+            self.cachedInterfaceID = (value, now)
+            return value
+        }
+        set {
+            Store.shared.set(key: "Network_interface", value: newValue)
+            self.interfaceIDLock.lock()
+            self.cachedInterfaceID = nil
+            self.interfaceIDLock.unlock()
+        }
     }
+    private let interfaceIDLock = NSLock()
+    private var cachedInterfaceID: (value: String, at: TimeInterval)? = nil
     private var lastInterfaceID: String = ""
     
     private func isVirtualInterface(_ name: String) -> Bool {
@@ -380,10 +400,12 @@ internal class UsageReader: Reader<Network_Usage>, CWEventDelegate, CLLocationMa
         let interfaceID = String(cString: pointer.pointee.ifa_name)
         let status = (pointer.pointee.ifa_flags & UInt32(IFF_UP)) != 0
         var transmitRate: Double? = nil
+        // an interface has several entries (link, IPv4, IPv6); the link speed only needs reading once
+        let isLink = pointer.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_LINK)
         
-        if let wifiInterface = CWWiFiClient.shared().interface(withName: interfaceID) {
+        if isLink, let wifiInterface = CWWiFiClient.shared().interface(withName: interfaceID) {
             transmitRate = wifiInterface.transmitRate()
-        } else if let address = pointer.pointee.ifa_addr, address.pointee.sa_family == UInt8(AF_LINK) {
+        } else if isLink, let address = pointer.pointee.ifa_addr, address.pointee.sa_family == UInt8(AF_LINK) {
             transmitRate = 0
             if let raw = pointer.pointee.ifa_data {
                 let dataPtr = raw.assumingMemoryBound(to: if_data.self)

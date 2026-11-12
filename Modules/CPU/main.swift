@@ -56,6 +56,8 @@ public struct CPU_AverageLoad: Codable, RemoteType {
 
 public class CPU: Module {
     private let popupView: Popup
+    private let inlineView: Popup = Popup(.CPU, inline: true)
+    public override var compactDetails: PopupWrapper? { self.inlineView }
     private let settingsView: Settings
     private let portalView: Portal
     private let notificationsView: Notifications
@@ -158,6 +160,7 @@ public class CPU: Module {
         #if arch(x86_64)
         self.limitReader = LimitReader(.CPU, popup: true) { [weak self] value in
             self?.popupView.limitCallback(value)
+            self?.inlineView.limitCallback(value)
         }
         #else
         self.frequencyReader = FrequencyReader(.CPU) { [weak self] value in
@@ -198,6 +201,7 @@ public class CPU: Module {
         guard let value = raw, self.enabled else { return }
         
         self.popupView.loadCallback(value)
+        self.inlineView.loadCallback(value)
         self.portalView.callback(value)
         self.compact.setValue("\(Int((value.totalUsage * 100).rounded()))%")
         CombinedSummary.shared.pushCPU(value.totalUsage)

@@ -136,6 +136,19 @@ public class CompactPortalRow: NSView {
     
     public let name: String
     public var onClick: ((String) -> Void)? = nil
+    // false: a plain header with no chevron, hover or click (used where the details are inline)
+    public var interactive: Bool = true {
+        didSet {
+            guard oldValue != self.interactive else { return }
+            self.chevron.isHidden = !self.interactive
+            self.valueToChevron?.isActive = self.interactive
+            self.valueToEdge?.isActive = !self.interactive
+            self.toolTip = self.interactive ? localizedString("Open details") : nil
+            self.highlighted = false
+        }
+    }
+    private var valueToChevron: NSLayoutConstraint? = nil
+    private var valueToEdge: NSLayoutConstraint? = nil
     
     private let defaultIcon: NSImage?
     private let iconBackground: NSView = NSView()
@@ -208,12 +221,14 @@ public class CompactPortalRow: NSView {
             text.trailingAnchor.constraint(lessThanOrEqualTo: self.valueField.leadingAnchor, constant: -6),
             
             self.valueField.centerYAnchor.constraint(equalTo: self.centerYAnchor),
-            self.valueField.trailingAnchor.constraint(equalTo: self.chevron.leadingAnchor, constant: -6),
             
             self.chevron.trailingAnchor.constraint(equalTo: self.trailingAnchor, constant: -8),
             self.chevron.centerYAnchor.constraint(equalTo: self.centerYAnchor),
             self.chevron.widthAnchor.constraint(equalToConstant: 8)
         ])
+        self.valueToChevron = self.valueField.trailingAnchor.constraint(equalTo: self.chevron.leadingAnchor, constant: -6)
+        self.valueToEdge = self.valueField.trailingAnchor.constraint(equalTo: self.trailingAnchor, constant: -8)
+        self.valueToChevron?.isActive = true
     }
     
     required init?(coder: NSCoder) {
@@ -293,6 +308,7 @@ public class CompactPortalRow: NSView {
     }
     
     public override func mouseEntered(with event: NSEvent) {
+        guard self.interactive else { return }
         self.highlighted = true
     }
     
@@ -303,7 +319,7 @@ public class CompactPortalRow: NSView {
     public override func mouseDown(with event: NSEvent) {}
     
     public override func mouseUp(with event: NSEvent) {
-        guard self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else { return }
+        guard self.interactive, self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else { return }
         self.highlighted = false
         self.onClick?(self.name)
     }
@@ -344,8 +360,17 @@ public final class CombinedSummary {
         public var download: Int64
         public var connected: Bool
         public var wifi: Bool
-        public init(upload: Int64, download: Int64, connected: Bool, wifi: Bool) {
-            self.upload = upload; self.download = download; self.connected = connected; self.wifi = wifi
+        public var rssi: Int? // Wi-Fi signal in dBm, nil when unknown
+        public init(upload: Int64, download: Int64, connected: Bool, wifi: Bool, rssi: Int? = nil) {
+            self.upload = upload; self.download = download; self.connected = connected; self.wifi = wifi; self.rssi = rssi
+        }
+        
+        // how many of the 3 Wi-Fi bars to light, as 0...1, using the usual dBm cutoffs
+        public var wifiStrength: Double {
+            guard let rssi else { return 1 }
+            if rssi >= -60 { return 1 }   // 3 bars: strong
+            if rssi >= -70 { return 0.6 } // 2 bars: fair
+            return 0.3                    // 1 bar: weak
         }
     }
     public struct Values {
@@ -392,7 +417,7 @@ public final class CombinedSummary {
 // `draw` paints into the current graphics context; `image` returns a template image
 // that tints like an SF Symbol.
 public enum Glyph: String {
-    case bean      // coffee bean, turned 45° counterclockwise
+    case bean      // Keep Awake: a filled circle split by a vertical line
     case ethernet  // macOS-style  < · · · >
     
     public var size: NSSize {
@@ -414,19 +439,10 @@ public enum Glyph: String {
         
         switch self {
         case .bean:
-            // an oval split by an S-shaped seam, low on the left and high on the right
-            let rotate = NSAffineTransform()
-            rotate.rotate(byDegrees: 45)
-            rotate.concat()
-            let rx: CGFloat = 6, ry: CGFloat = 4.8
-            NSBezierPath(ovalIn: NSRect(x: -rx, y: -ry, width: rx*2, height: ry*2)).fill()
-            let seam = NSBezierPath()
-            seam.move(to: NSPoint(x: -rx - 1, y: -0.6))
-            seam.curve(to: NSPoint(x: rx + 1, y: 0.6), controlPoint1: NSPoint(x: -1.8, y: -2.6), controlPoint2: NSPoint(x: 1.8, y: 2.6))
-            seam.lineWidth = 1.3
-            seam.lineCapStyle = .round
-            ctx.compositingOperation = .destinationOut
-            seam.stroke()
+            let r: CGFloat = 5.5
+            NSBezierPath(ovalIn: NSRect(x: -r, y: -r, width: r*2, height: r*2)).fill()
+            // the line is cut out of the circle, so it shows whatever is behind
+            NSRect(x: -0.65, y: -r - 1, width: 1.3, height: r*2 + 2).fill(using: .destinationOut)
         case .ethernet:
             let w: CGFloat = 17, h: CGFloat = 9
             let chevrons = NSBezierPath()

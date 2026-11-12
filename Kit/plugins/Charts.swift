@@ -635,23 +635,29 @@ public class LineChartView: ChartView {
         return result
     }
     
+    // The newest point's time and the usual time between points (the median of the
+    // most recent gaps). Walks back from the newest point and stops after a handful of
+    // gaps, since this runs on every new value.
     private func intervalStatsLocked() -> (lastTs: Date, typical: TimeInterval)? {
+        let maxDeltas = 9
         var deltas: [TimeInterval] = []
-        var prev: Date?
+        deltas.reserveCapacity(maxDeltas)
+        var next: Date?
         var lastTs: Date?
         let n = self.points.count
-        for i in 0..<n {
-            let p = self.points[(self.head + i) % n]
-            if let p {
-                if let prev {
-                    let d = p.ts.timeIntervalSince(prev)
+        var i = n - 1
+        while i >= 0 && deltas.count < maxDeltas {
+            if let p = self.points[(self.head + i) % n] {
+                if lastTs == nil { lastTs = p.ts }
+                if let next {
+                    let d = next.timeIntervalSince(p.ts)
                     if d > 0 { deltas.append(d) }
                 }
-                prev = p.ts
-                lastTs = p.ts
+                next = p.ts
             } else {
-                prev = nil
+                next = nil
             }
+            i -= 1
         }
         guard let lastTs, deltas.count >= 2 else { return nil }
         deltas.sort()

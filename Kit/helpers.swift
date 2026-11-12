@@ -349,6 +349,13 @@ public class StatusBadgeView: NSStackView {
     }
 }
 
+// true for placeholder values that say nothing ("Unknown", "Unavailable", "-", empty),
+// so compact layouts can hide those rows
+public func isUnknownValue(_ value: String) -> Bool {
+    let v = value.trimmingCharacters(in: .whitespaces)
+    return v.isEmpty || v == "-" || v == localizedString("Unknown") || v == localizedString("Unavailable")
+}
+
 public var isRTL: Bool {
     NSApp.userInterfaceLayoutDirection == .rightToLeft
 }

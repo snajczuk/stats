@@ -58,6 +58,8 @@ public struct Pressure: Codable {
 
 public class RAM: Module {
     private let popupView: Popup
+    private let inlineView: Popup = Popup(.RAM, inline: true)
+    public override var compactDetails: PopupWrapper? { self.inlineView }
     private let settingsView: Settings
     private let portalView: Portal
     private let notificationsView: Notifications
@@ -155,6 +157,7 @@ public class RAM: Module {
         guard let value = raw, self.enabled else { return }
         
         self.popupView.loadCallback(value)
+        self.inlineView.loadCallback(value)
         self.portalView.callback(value)
         self.compact.setValue("\(Int((value.usage * 100).rounded()))%")
         let pressure: Int

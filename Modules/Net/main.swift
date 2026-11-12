@@ -139,6 +139,8 @@ public struct Network_Process: Codable, Process_p {
 
 public class Network: Module {
     private let popupView: Popup
+    private let inlineView: Popup = Popup(.network, inline: true)
+    public override var compactDetails: PopupWrapper? { self.inlineView }
     private let settingsView: Settings
     private let portalView: Portal
     private let notificationsView: Notifications
@@ -190,6 +192,9 @@ public class Network: Module {
         self.usageReader = UsageReader(.network) { [weak self] value in
             self?.usageCallback(value)
         }
+        self.inlineView.locationPermissionAction = { [weak self] in
+            self?.popupView.locationPermissionAction?()
+        }
         self.popupView.locationPermissionAction = { [weak self] in
             self?.usageReader?.requestWiFiLocationAuthorization()
         }
@@ -222,6 +227,7 @@ public class Network: Module {
         self.settingsView.connectivityHostCallback = { [weak self] isDisabled in
             if isDisabled {
                 self?.popupView.resetConnectivityView()
+                self?.inlineView.resetConnectivityView()
                 self?.connectivityCallback(Network_Connectivity(status: false))
             }
         }
@@ -252,6 +258,7 @@ public class Network: Module {
         guard let value = raw, self.enabled else { return }
         
         self.popupView.usageCallback(value)
+        self.inlineView.usageCallback(value)
         self.portalView.usageCallback(value)
         self.compactCallback(value)
         self.notificationsView.usageCallback(value)
@@ -382,7 +389,8 @@ public class Network: Module {
         self.compact.setValue("↓\(down) ↑\(up)", subtitle: subtitle)
         CombinedSummary.shared.update {
             $0.network = .init(upload: value.bandwidth.upload, download: value.bandwidth.download,
-                               connected: value.status, wifi: value.connectionType == .wifi)
+                               connected: value.status, wifi: value.connectionType == .wifi,
+                               rssi: value.wifiDetails.RSSI)
         }
     }
     
@@ -390,6 +398,7 @@ public class Network: Module {
         guard let value = raw, self.enabled else { return }
         
         self.popupView.connectivityCallback(value)
+        self.inlineView.connectivityCallback(value)
         self.notificationsView.connectivityCallback(value)
         self.previewView.connectivityCallback(value)
         
