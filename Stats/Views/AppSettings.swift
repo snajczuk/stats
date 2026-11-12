@@ -359,6 +359,8 @@ class ApplicationSettings: NSStackView {
     // MARK: - actions
     
     @objc private func updateAction() {
+        // fork: upstream releases would replace this build
+        guard !ApplicationSettings.isFork else { return }
         updater.check(force: true, completion: { result, error in
             if error != nil {
                 debug("error updater.check(): \(error!.localizedDescription)")
@@ -558,7 +560,7 @@ class ApplicationSettings: NSStackView {
         guard let state = notification.userInfo?["state"] as? Bool, let v = self.fanHelperView else {
             return
         }
-        v.isHidden = !state || ApplicationSettings.forkHidesFanHelper
+        v.isHidden = !state || ApplicationSettings.isFork
     }
     
     @objc private func uninstallHelper() {
@@ -888,18 +890,20 @@ private class ModulePreview: NSStackView {
 // Hides what this fork doesn't use instead of deleting it, so upstream changes to that
 // code keep merging cleanly.
 extension ApplicationSettings {
-    static let forkHidesFanHelper = true
+    static let isFork = true // hides and disables what this fork doesn't use
     private static let forkModules = ["Battery", "CPU", "RAM", "Network"]
     
     fileprivate func applyForkLayout(_ stack: NSStackView) {
         let sections = stack.arrangedSubviews.compactMap({ $0 as? PreferencesSection })
         
-        // general: only start at login and keeping menu bar positions. Hidden: update checks
-        // (the fork never updates from upstream), temperature units (nothing shown uses
-        // them), the dock icon and macOS desktop widgets
+        // general: only start at login. Hidden: update checks (the fork never updates from
+        // upstream), temperature units (nothing shown uses them), the dock icon, keeping menu
+        // bar positions (the summary items keep theirs anyway) and macOS desktop widgets
         if let general = sections.first {
-            [0, 1, 2, 5].forEach { general.setRowVisibility($0, newState: false) }
+            [0, 1, 2, 4, 5].forEach { general.setRowVisibility($0, newState: false) }
         }
+        // the "Check for update" button under the app's name and version
+        self.hideButton(in: stack, action: #selector(self.updateAction))
         // the summary items style is the only one this fork uses, so its picker goes too
         self.combinedModulesView?.isHidden = true
         self.remoteView?.isHidden = true // System Stats cloud monitoring
@@ -970,6 +974,20 @@ extension ApplicationSettings {
             state: Store.shared.bool(key: "CombinedModules_details", defaultValue: true)
         )))
         return rows
+    }
+    
+    // hides a button, and its whole row when it sits in a grid
+    private func hideButton(in view: NSView, action: Selector) {
+        if let button = view as? NSButton, button.action == action {
+            var parent = button.superview
+            while let p = parent, !(p is NSGridView) { parent = p.superview }
+            if let grid = parent as? NSGridView, let row = grid.cell(for: button)?.row {
+                row.isHidden = true
+            }
+            button.isHidden = true
+            return
+        }
+        view.subviews.forEach { self.hideButton(in: $0, action: action) }
     }
     
     private func containsButton(in view: NSView, action: Selector) -> Bool {

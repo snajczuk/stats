@@ -1700,11 +1700,29 @@ public class PreferencesSection: NSStackView {
             if self.container.subviews.count > 1 {
                 self.container.subviews[1].isHidden = !newState
             }
+            self.updateSeparators()
             return
         }
         for i in self.container.subviews.indices where i/2 == at && Double(i).remainder(dividingBy: 2) == 0 {
             self.container.subviews[i-1].isHidden = !newState
             self.container.subviews[i].isHidden = !newState
+        }
+        self.updateSeparators()
+    }
+    
+    // A divider shows only between two visible rows, however many rows around it are hidden.
+    private func updateSeparators() {
+        var seenRow = false
+        var pending: NSView? = nil
+        for view in self.container.subviews {
+            if view is PreferencesSeparator {
+                view.isHidden = true
+                if seenRow && pending == nil { pending = view }
+            } else if !view.isHidden {
+                pending?.isHidden = false
+                pending = nil
+                seenRow = true
+            }
         }
     }
     public func setRowVisibility(_ id: String, newState: Bool) {
