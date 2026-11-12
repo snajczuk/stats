@@ -1122,7 +1122,8 @@ internal class SummaryIconView: NSView {
                 if plugged {
                     // bolt while charging; plug when on power but not charging (full, or on hold)
                     if battery?.charging ?? false {
-                        self.drawBadge("bolt.fill", scale: 1.4, in: rect)
+                        // at the same scale the visible bolt (about 8×12) matches the upright plug (8×12.4)
+                        self.drawBadge("bolt.fill", scale: 1.0, in: rect)
                     } else {
                         // turned upright (prongs up); slightly smaller since it's long
                         self.drawBadge("powerplug.fill", scale: 1.0, rotation: 90, in: rect)
