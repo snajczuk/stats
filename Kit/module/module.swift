@@ -256,6 +256,13 @@ open class Module {
         self.readers = list.filter({ $0 != nil }).map({ $0! as Reader_p })
     }
     
+    // How often the module's main reading updates, in seconds. Modules list their main
+    // reader first; the others (top processes, connectivity) keep their own intervals.
+    public func setUpdateInterval(_ seconds: Int) {
+        Store.shared.set(key: "\(self.config.name)_updateInterval", value: seconds)
+        self.readers.first?.setInterval(seconds)
+    }
+    
     public func summaryCallback(_ value: Double?) {
         guard self.config.hasSummary else { return }
         

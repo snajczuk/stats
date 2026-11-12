@@ -1716,6 +1716,10 @@ public class PreferencesSection: NSStackView {
         self.setRowVisibility(at/2, newState: newState)
     }
     
+    public func findRows(id: String) -> [PreferencesRow] {
+        self.container.subviews.compactMap({ $0 as? PreferencesRow }).filter({ $0.identifier?.rawValue == id })
+    }
+    
     public func findRow(_ id: String) -> PreferencesRow? {
         let rows: [PreferencesRow] = self.container.subviews.filter({ $0 is PreferencesRow }).compactMap({ $0 as? PreferencesRow })
         return rows.first(where: { $0.identifier?.rawValue == id })

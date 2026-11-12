@@ -23,17 +23,12 @@ import Clock
 import Remote
 
 let updater = Updater(github: "exelban/stats", url: "https://api.mac-stats.com/release/latest")
+// fork: only the modules the summary items use; the others stay in the code but aren't loaded
 var modules: [Module] = [
     CPU(),
-    GPU(),
     RAM(),
-    Disk(),
-    Sensors(),
     Network(),
-    Battery(),
-    Bluetooth(),
-    Clock(),
-    Remote()
+    Battery()
 ]
 
 @main

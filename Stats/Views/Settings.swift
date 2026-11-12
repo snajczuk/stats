@@ -57,7 +57,9 @@ class SettingsWindow: NSWindow, NSWindowDelegate, NSToolbarDelegate {
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarVC)
         let contentItem = NSSplitViewItem(viewController: mainVC)
         
-        sidebarItem.canCollapse = false
+        // fork: there's only the Settings page, so no sidebar
+        sidebarItem.canCollapse = true
+        sidebarItem.isCollapsed = true
         contentItem.canCollapse = false
         
         sidebarViewController.addSplitViewItem(sidebarItem)
@@ -95,8 +97,8 @@ class SettingsWindow: NSWindow, NSWindowDelegate, NSToolbarDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(menuCallback), name: .openModuleSettings, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(externalModuleToggle), name: .toggleModule, object: nil)
         
-        self.sidebarView.setModules(modules)
-        self.sidebarView.openMenu("Dashboard")
+        // fork: no module pages or dashboard; everything lives on the Settings page
+        NotificationCenter.default.post(name: .openModuleSettings, object: nil, userInfo: ["module": "Settings"])
     }
     
     deinit {
@@ -198,9 +200,9 @@ class SettingsWindow: NSWindow, NSWindowDelegate, NSToolbarDelegate {
         NSApp.activate(ignoringOtherApps: true)
         self.makeKeyAndOrderFront(nil)
         
-        if var name = module {
-            if name == "Combined modules" { name = "Dashboard" }
-            self.sidebarView.openMenu(name)
+        if module != nil {
+            // fork: every request (a module, the dashboard) lands on the Settings page
+            NotificationCenter.default.post(name: .openModuleSettings, object: nil, userInfo: ["module": "Settings"])
         }
         self.updateReaderVisibility()
     }

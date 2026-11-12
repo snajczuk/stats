@@ -173,6 +173,8 @@ extension AppDelegate {
     }
     
     internal func checkForNewVersion(silent: Bool = false) {
+        // fork: upstream releases would replace this build, so never check or install them
+        return
         updater.check { result, error in
             if error != nil {
                 debug("error updater.check(): \(error!.localizedDescription)")

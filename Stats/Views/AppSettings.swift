@@ -76,6 +76,7 @@ class ApplicationSettings: NSStackView {
     private let moduleSelector: ModuleSelectorView = ModuleSelectorView()
     private var combinedIconSelect: NSPopUpButton? = nil
     private var keepScreenSwitch: NSSwitch? = nil
+    fileprivate var forkModulesSection: PreferencesSection? = nil
 
     private static let combinedModulesClickActions: [KeyValue_t] = [
         KeyValue_t(key: "list", value: "Combined list"),
@@ -147,10 +148,6 @@ class ApplicationSettings: NSStackView {
             selected: self.combinedModulesIconSymbol
         )
         self.combinedIconSelect = iconSelect
-        let keepScreen = switchView(action: #selector(self.toggleKeepScreenOn), state: KeepAwake.shared.keepScreenOn)
-        self.keepScreenSwitch = keepScreen
-        // the dropdown can change it too
-        NotificationCenter.default.addObserver(self, selector: #selector(self.syncKeepScreen), name: .keepAwakeChanged, object: nil)
         // rows by index; updateCombinedModulesSettings() shows only the ones that apply
         self.combinedModulesView = PreferencesSection(
             title: localizedString("Combined modules"),
@@ -184,8 +181,7 @@ class ApplicationSettings: NSStackView {
                 PreferencesRow(localizedString("Compact list"), component: switchView( // 7
                     action: #selector(self.toggleCombinedModulesCompact),
                     state: self.combinedModulesCompact
-                )),
-                PreferencesRow(localizedString("Keep Awake keeps the screen on"), component: keepScreen) // 8
+                ))
             ]
         )
         scrollView.stackView.addArrangedSubview(self.combinedModulesView!)
@@ -274,6 +270,8 @@ class ApplicationSettings: NSStackView {
         #if arch(arm64)
         scrollView.stackView.addArrangedSubview(PreferencesSection(title: localizedString("Stress tests"), tests))
         #endif
+        
+        self.applyForkLayout(scrollView.stackView)
         
         NotificationCenter.default.addObserver(self, selector: #selector(self.toggleUninstallHelperButton), name: .fanHelperState, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.handleRemoteState), name: .remoteState, object: nil)
@@ -432,8 +430,7 @@ class ApplicationSettings: NSStackView {
             4: on && style == .widgets,
             5: on && style == .widgets,
             6: on && style == .widgets,
-            7: on && (style == .icon || style.isSummaryWidget || (style == .widgets && self.combinedModulesPopup)),
-            8: on
+            7: on && (style == .icon || style.isSummaryWidget || (style == .widgets && self.combinedModulesPopup))
         ]
         visible.forEach { self.combinedModulesView?.setRowVisibility($0.key, newState: $0.value) }
     }
@@ -472,6 +469,21 @@ class ApplicationSettings: NSStackView {
     
     @objc private func toggleKeepScreenOn(_ sender: NSButton) {
         KeepAwake.shared.keepScreenOn = sender.state == .on
+    }
+    
+    @objc private func toggleSummaryWifiStrength(_ sender: NSButton) {
+        Store.shared.set(key: "CombinedModules_wifiStrength", value: sender.state == .on)
+        NotificationCenter.default.post(name: .combinedSummaryLayoutChanged, object: nil)
+    }
+    
+    @objc private func toggleSummaryNetworkDots(_ sender: NSButton) {
+        Store.shared.set(key: "CombinedModules_networkDots", value: sender.state == .on)
+        NotificationCenter.default.post(name: .combinedSummaryLayoutChanged, object: nil)
+    }
+    
+    @objc private func toggleSummaryDetails(_ sender: NSButton) {
+        Store.shared.set(key: "CombinedModules_details", value: sender.state == .on)
+        NotificationCenter.default.post(name: .combinedModulesPopup, object: nil)
     }
     
     @objc private func syncKeepScreen() {
@@ -546,7 +558,7 @@ class ApplicationSettings: NSStackView {
         guard let state = notification.userInfo?["state"] as? Bool, let v = self.fanHelperView else {
             return
         }
-        v.isHidden = !state
+        v.isHidden = !state || ApplicationSettings.forkHidesFanHelper
     }
     
     @objc private func uninstallHelper() {
@@ -868,5 +880,131 @@ private class ModulePreview: NSStackView {
     
     override func mouseExited(with: NSEvent) {
         NSCursor.arrow.set()
+    }
+}
+
+// MARK: - Fork: only the settings this fork uses
+
+// Hides what this fork doesn't use instead of deleting it, so upstream changes to that
+// code keep merging cleanly.
+extension ApplicationSettings {
+    static let forkHidesFanHelper = true
+    private static let forkModules = ["Battery", "CPU", "RAM", "Network"]
+    
+    fileprivate func applyForkLayout(_ stack: NSStackView) {
+        let sections = stack.arrangedSubviews.compactMap({ $0 as? PreferencesSection })
+        
+        // general: only start at login and keeping menu bar positions. Hidden: update checks
+        // (the fork never updates from upstream), temperature units (nothing shown uses
+        // them), the dock icon and macOS desktop widgets
+        if let general = sections.first {
+            [0, 1, 2, 5].forEach { general.setRowVisibility($0, newState: false) }
+        }
+        // the summary items style is the only one this fork uses, so its picker goes too
+        self.combinedModulesView?.isHidden = true
+        self.remoteView?.isHidden = true // System Stats cloud monitoring
+        self.fanHelperView?.isHidden = true
+        // export, import, reset
+        sections.first(where: { self.containsButton(in: $0, action: #selector(self.exportSettings)) })?.isHidden = true
+        #if arch(arm64)
+        sections.last?.isHidden = true // stress tests
+        #endif
+        
+        let section = PreferencesSection(
+            title: localizedString("Modules"),
+            subtitle: localizedString("What Stats reads and shows in the menu bar"),
+            self.forkModuleRows()
+        )
+        stack.addArrangedSubview(section)
+        self.forkModulesSection = section
+        self.syncForkModules()
+        NotificationCenter.default.addObserver(self, selector: #selector(self.syncForkModules), name: .toggleModule, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.syncKeepScreen), name: .keepAwakeChanged, object: nil)
+    }
+    
+    // Each module's switch, followed by its own options (indented):
+    // Battery › Keep Awake keeps the screen on; Network › signal strength, activity dots.
+    // Then one option for all dropdowns.
+    private func forkModuleRows() -> [PreferencesRow] {
+        func option(_ title: String, _ module: String, _ toggle: NSSwitch) -> PreferencesRow {
+            let row = PreferencesRow(localizedString(title), component: toggle)
+            row.edgeInsets.left += 20
+            row.identifier = NSUserInterfaceItemIdentifier("option:\(module)")
+            return row
+        }
+        
+        // one refresh rate for all modules, shown as the CPU's (they're always set together)
+        let interval = Store.shared.int(key: "CPU_updateInterval", defaultValue: 1)
+        var rows: [PreferencesRow] = [
+            PreferencesRow(localizedString("Update interval"), component: selectView(
+                action: #selector(self.toggleForkUpdateInterval(_:)),
+                items: ReaderUpdateIntervals,
+                selected: "\(interval)"
+            ))
+        ]
+        for name in ApplicationSettings.forkModules {
+            guard let module = modules.first(where: { $0.config.name == name }), module.available else { continue }
+            let toggle = switchView(action: #selector(self.toggleForkModule(_:)), state: module.enabled)
+            toggle.identifier = NSUserInterfaceItemIdentifier(name)
+            rows.append(PreferencesRow(localizedString(name), component: toggle))
+            
+            switch name {
+            case "Battery":
+                let keepScreen = switchView(action: #selector(self.toggleKeepScreenOn), state: KeepAwake.shared.keepScreenOn)
+                self.keepScreenSwitch = keepScreen
+                rows.append(option("Keep Awake keeps the screen on", name, keepScreen))
+            case "Network":
+                rows.append(option("Wi-Fi icon shows signal strength", name, switchView(
+                    action: #selector(self.toggleSummaryWifiStrength),
+                    state: Store.shared.bool(key: "CombinedModules_wifiStrength", defaultValue: true)
+                )))
+                rows.append(option("Network activity dots", name, switchView(
+                    action: #selector(self.toggleSummaryNetworkDots),
+                    state: Store.shared.bool(key: "CombinedModules_networkDots", defaultValue: true)
+                )))
+            default: break
+            }
+        }
+        rows.append(PreferencesRow(localizedString("Details in dropdowns"), component: switchView(
+            action: #selector(self.toggleSummaryDetails),
+            state: Store.shared.bool(key: "CombinedModules_details", defaultValue: true)
+        )))
+        return rows
+    }
+    
+    private func containsButton(in view: NSView, action: Selector) -> Bool {
+        if let button = view as? NSButton, button.action == action { return true }
+        return view.subviews.contains(where: { self.containsButton(in: $0, action: action) })
+    }
+    
+    @objc fileprivate func toggleForkUpdateInterval(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String, let seconds = Int(key) else { return }
+        modules.forEach { $0.setUpdateInterval(seconds) }
+    }
+    
+    @objc fileprivate func toggleForkModule(_ sender: NSSwitch) {
+        guard let name = sender.identifier?.rawValue else { return }
+        NotificationCenter.default.post(name: .toggleModule, object: nil, userInfo: ["module": name, "state": sender.state == .on])
+    }
+    
+    // a module can also be turned on or off elsewhere
+    @objc fileprivate func syncForkModules() {
+        DispatchQueue.main.async {
+            guard let section = self.forkModulesSection else { return }
+            section.subviews.forEach { self.syncSwitches(in: $0) }
+            if let network = modules.first(where: { $0.config.name == "Network" }) {
+                section.findRows(id: "option:Network").forEach {
+                    section.setRowVisibility($0, newState: network.enabled)
+                }
+            }
+        }
+    }
+    
+    private func syncSwitches(in view: NSView) {
+        if let toggle = view as? NSSwitch, let name = toggle.identifier?.rawValue,
+           let module = modules.first(where: { $0.config.name == name }) {
+            toggle.state = module.enabled ? .on : .off
+        }
+        view.subviews.forEach { self.syncSwitches(in: $0) }
     }
 }

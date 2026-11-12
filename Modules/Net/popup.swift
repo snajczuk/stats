@@ -435,6 +435,7 @@ internal class Popup: PopupWrapper {
         view.spacing = 0
         
         let interface = popupRow(view, title: "\(localizedString("Interface")):", value: localizedString("Unknown"))
+        interface.1.lineBreakMode = .byTruncatingTail // "…" rather than cut off if it's ever too long
         self.inlineInterfaceField = interface.1
         self.inlineInterfaceRow = interface.2
         let wifi = popupRow(view, title: "\(localizedString("Wi-Fi")):", value: localizedString("Unknown"))
@@ -483,7 +484,8 @@ internal class Popup: PopupWrapper {
     private func linkSpeed(_ mbps: Double) -> String? {
         guard mbps > 0 else { return nil }
         if mbps >= 1000 {
-            return "\((mbps / 1000).rounded(toPlaces: 1)) Gbps"
+            let gbps = (mbps / 1000).rounded(toPlaces: 1)
+            return gbps == gbps.rounded() ? "\(Int(gbps)) Gbps" : "\(gbps) Gbps"
         }
         return "\(Int(mbps.rounded())) Mbps"
     }
@@ -511,9 +513,11 @@ internal class Popup: PopupWrapper {
             return list.isEmpty ? unknown : list.joined(separator: " · ")
         }
         
-        // Wi-Fi (en0) · 1.2 Gbps
+        // en7 · 1 Gbps. The adapter's name ("USB 10/100/1000 LAN") is too long for the row and
+        // mostly repeats the header (Ethernet, or the Wi-Fi network), so it's in the tooltip.
         if let interface = value.interface {
-            self.inlineInterfaceField?.stringValue = join(["\(interface.displayName) (\(interface.BSDName))", self.linkSpeed(interface.transmitRate)])
+            self.inlineInterfaceField?.stringValue = join([interface.BSDName, self.linkSpeed(interface.transmitRate)])
+            self.inlineInterfaceField?.toolTip = interface.displayName
         } else {
             self.inlineInterfaceField?.stringValue = unknown
         }

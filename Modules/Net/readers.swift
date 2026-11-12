@@ -345,6 +345,12 @@ internal class UsageReader: Reader<Network_Usage>, CWEventDelegate, CLLocationMa
         self.usage.total.upload += self.usage.bandwidth.upload
         self.usage.total.download += self.usage.bandwidth.download
         
+        // speeds are per second; with a longer update interval the change covers several seconds
+        if interval > 1 {
+            self.usage.bandwidth.upload = Int64(Double(self.usage.bandwidth.upload) / interval)
+            self.usage.bandwidth.download = Int64(Double(self.usage.bandwidth.download) / interval)
+        }
+        
         self.usage.status = self.reachability.isReachable
         
         if self.vpnConnection && self.VPNMode {

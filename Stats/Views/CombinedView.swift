@@ -131,7 +131,7 @@ internal class CombinedView: NSObject, NSGestureRecognizerDelegate {
     }
     
     // Status items are placed to the left of the ones created before them,
-    // so create them right to left: network, CPU/RAM, battery, clock.
+    // so create them right to left: network, memory, CPU, battery, clock.
     private func enableSummary() {
         guard self.summaryItems.isEmpty else { return }
         self.summaryItems = SummaryIconView.Group.allCases.reversed().map { group in
@@ -585,7 +585,14 @@ private class Popup: NSStackView, Popup_p {
         
         var h: CGFloat = 0
         let list = modules.filter({ $0.enabled && $0.compactSupported && self.included($0) })
-        list.forEach { m in
+        list.enumerated().forEach { (i, m) in
+            // in a summary item's dropdown, a line between modules (CPU | RAM)
+            if i > 0 && self.group != nil {
+                let line = ModuleSeparator()
+                self.addArrangedSubview(line)
+                line.widthAnchor.constraint(equalTo: self.widthAnchor).isActive = true
+                h += ModuleSeparator.height
+            }
             let row = m.compact
             // in a summary item's dropdown the details are already shown, so the row isn't a link
             row.interactive = self.group == nil
@@ -597,7 +604,7 @@ private class Popup: NSStackView, Popup_p {
             h += CompactPortalRow.height
             
             // a summary item's dropdown also shows the module's key metrics under its row
-            if self.group != nil, let details = m.compactDetails {
+            if self.group != nil, Store.shared.bool(key: "CombinedModules_details", defaultValue: true), let details = m.compactDetails {
                 let box = DetailsBox(details)
                 details.sizeCallback = { [weak self] _ in
                     DispatchQueue.main.async { self?.relayout() }
@@ -627,6 +634,8 @@ private class Popup: NSStackView, Popup_p {
             } else if let box = v as? DetailsBox {
                 box.sync()
                 h += box.height
+            } else if v is ModuleSeparator {
+                h += ModuleSeparator.height
             } else {
                 h += v.frame.height
             }
@@ -701,6 +710,29 @@ private class Popup: NSStackView, Popup_p {
         view.setFrameSize(NSSize(width: self.frame.width, height: h))
         view.heightAnchor.constraint(equalToConstant: h).isActive = true
         return view
+    }
+}
+
+// A thin line between two modules in a dropdown, inset from the edges like the footer's.
+private class ModuleSeparator: NSView {
+    static let height: CGFloat = 9
+    
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: Constants.Popup.width, height: ModuleSeparator.height))
+        let line = NSBox()
+        line.boxType = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        self.addSubview(line)
+        NSLayoutConstraint.activate([
+            self.heightAnchor.constraint(equalToConstant: ModuleSeparator.height),
+            line.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: 8),
+            line.trailingAnchor.constraint(equalTo: self.trailingAnchor, constant: -8),
+            line.centerYAnchor.constraint(equalTo: self.centerYAnchor)
+        ])
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }
 
@@ -818,7 +850,7 @@ private final class SummaryStatusItem: NSObject {
         })
         self.item.button?.image = NSImage()
         self.item.button?.addSubview(self.icon)
-        self.item.button?.toolTip = localizedString(group.title)
+        self.item.button?.setAccessibilityLabel(localizedString(group.title)) // no hover text
         self.item.button?.target = self
         self.item.button?.action = #selector(self.handleClick)
         self.item.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
@@ -836,8 +868,13 @@ private final class SummaryStatusItem: NSObject {
         NSStatusBar.system.removeStatusItem(self.item)
     }
     
+    // an item with nothing to show leaves the menu bar instead of sitting there empty
     private func syncLength() {
-        self.item.length = self.icon.frame.width
+        let width = self.icon.frame.width
+        self.item.length = width
+        if self.item.isVisible != (width > 0) {
+            self.item.isVisible = width > 0
+        }
     }
     
     @objc private func handleClick() {
@@ -852,13 +889,14 @@ private final class SummaryStatusItem: NSObject {
 internal class SummaryIconView: NSView {
     // which segments go in the same menu bar item, in left-to-right order
     enum Group: String, CaseIterable {
-        case clock, power, compute, network
+        case clock, power, cpu, memory, network
         
         var title: String {
             switch self {
             case .clock: return "Clock"
             case .power: return "Battery"
-            case .compute: return "CPU and memory"
+            case .cpu: return "CPU"
+            case .memory: return "Memory"
             case .network: return "Network"
             }
         }
@@ -868,16 +906,18 @@ internal class SummaryIconView: NSView {
             switch self {
             case .clock: return "Clock"
             case .power: return "Battery"
-            case .compute: return "CPU"
+            case .cpu: return "CPU"
+            case .memory: return "RAM"
             case .network: return "Network"
             }
         }
         
-        // Activity Monitor tab for "Open Activity Monitor…": 0 CPU, 2 Energy, 4 Network
+        // Activity Monitor tab for "Open Activity Monitor…": 0 CPU, 1 Memory, 2 Energy, 4 Network
         var activityMonitorTab: Int? {
             switch self {
             case .power: return 2
-            case .compute: return 0
+            case .cpu: return 0
+            case .memory: return 1
             case .network: return 4
             case .clock: return nil
             }
@@ -888,7 +928,8 @@ internal class SummaryIconView: NSView {
             switch self {
             case .clock: return ["Clock"]
             case .power: return ["Battery"]
-            case .compute: return ["CPU", "RAM"]
+            case .cpu: return ["CPU"]
+            case .memory: return ["RAM"]
             case .network: return ["Network"]
             }
         }
@@ -908,6 +949,10 @@ internal class SummaryIconView: NSView {
     private let iconGap: CGFloat = 3     // between a symbol and its graphic
     private let wifiPointSize: CGFloat = 15 // matches the size of the system Wi-Fi icon
     private let wifiLift: CGFloat = 1       // and its vertical position
+    
+    // options from Settings › Combined modules
+    private var showsWifiStrength: Bool { Store.shared.bool(key: "CombinedModules_wifiStrength", defaultValue: true) }
+    private var showsNetworkDots: Bool { Store.shared.bool(key: "CombinedModules_networkDots", defaultValue: true) }
     private let clockFont = NSFont.monospacedDigitSystemFont(ofSize: 14, weight: .semibold)
     private let clockFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -924,6 +969,7 @@ internal class SummaryIconView: NSView {
         
         NotificationCenter.default.addObserver(self, selector: #selector(self.refresh), name: .combinedSummaryChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(self.refresh), name: .keepAwakeChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.relayoutNow), name: .combinedSummaryLayoutChanged, object: nil)
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -943,8 +989,20 @@ internal class SummaryIconView: NSView {
     
     func setSegments(_ names: Set<String>) {
         self.segments = names
-        self.contentKey = nil
-        self.updateWidth()
+        self.relayoutNow()
+    }
+    
+    // Applies the new width at once, skipping the usual delay before shrinking (that delay
+    // is for jittery speed values, not for a segment being turned off).
+    @objc func relayoutNow() {
+        self.contentKey = self.currentContentKey()
+        self.shrinkSince = nil
+        let w = self.layout(draw: false)
+        if w != self.frame.width {
+            self.setFrameSize(NSSize(width: w, height: Constants.Widget.height))
+            self.widthChanged?()
+        }
+        self.needsDisplay = true
     }
     
     private func shows(_ group: Group, _ module: String) -> Bool {
@@ -979,14 +1037,15 @@ internal class SummaryIconView: NSView {
         if self.shows(.power, "Battery"), let b = values.battery {
             key += "b\(Int(b.level * 100)),\(b.pluggedIn),\(b.charging)|"
         }
-        if self.shows(.compute, "CPU") {
+        if self.shows(.cpu, "CPU") {
             key += "u" + values.cpu.map({ String(Int($0 * 100)) }).joined(separator: ",") + "|"
         }
-        if self.shows(.compute, "RAM") {
+        if self.shows(.memory, "RAM") {
             key += "m\(values.memory?.pressure ?? 0)|"
         }
         if self.shows(.network, "Network"), let n = values.network {
-            key += "n\(n.connected),\(n.wifi),\(n.wifiStrength),\(SummaryIconView.litDots(n.upload)),\(SummaryIconView.litDots(n.download))|"
+            key += "n\(n.connected),\(n.wifi),\(self.showsWifiStrength ? n.wifiStrength : 1),"
+            key += self.showsNetworkDots ? "\(SummaryIconView.litDots(n.upload)),\(SummaryIconView.litDots(n.download))|" : "-|"
         }
         return key
     }
@@ -1066,7 +1125,6 @@ internal class SummaryIconView: NSView {
         let values = CombinedSummary.shared.values
         let height = Constants.Widget.height
         let midY = height / 2
-        let content = height - 4 // usable height, leaving 2pt above and below
         var x: CGFloat = 0
         var first = true
         
@@ -1134,10 +1192,11 @@ internal class SummaryIconView: NSView {
         }
         
         // CPU: history bars, newest on the right, colored by load
-        if self.shows(.compute, "CPU") {
+        if self.shows(.cpu, "CPU") {
             startSegment()
             let count = CombinedSummary.cpuHistoryLength, w: CGFloat = 2, spacing: CGFloat = 1.5
-            let maxH: CGFloat = content - 2, minH: CGFloat = 2
+            // about as tall as the battery bar (9) and network dots (11) next to it
+            let maxH: CGFloat = 11, minH: CGFloat = 2
             let history = values.cpu
             for i in 0..<count {
                 // pad on the left until enough samples arrive
@@ -1157,7 +1216,7 @@ internal class SummaryIconView: NSView {
         }
         
         // RAM: three squares for pressure (normal, warning, critical)
-        if self.shows(.compute, "RAM") {
+        if self.shows(.memory, "RAM") {
             startSegment()
             let filled = values.memory?.pressure ?? 0
             let size: CGFloat = 7, spacing: CGFloat = 2
@@ -1180,8 +1239,9 @@ internal class SummaryIconView: NSView {
             } else if let net, !net.wifi {
                 x += self.glyph(.ethernet, x: x, draw: draw)
             } else {
-                x += self.symbol("wifi", variableValue: net?.wifiStrength ?? 1, pointSize: self.wifiPointSize, lift: self.wifiLift, x: x, draw: draw)
+                x += self.symbol("wifi", variableValue: self.showsWifiStrength ? (net?.wifiStrength ?? 1) : 1, pointSize: self.wifiPointSize, lift: self.wifiLift, x: x, draw: draw)
             }
+            guard self.showsNetworkDots else { return ceil(x) }
             x += self.iconGap + 1
             
             // two rows (upload on top, download below): a small arrow, then 4 dots that
@@ -1307,6 +1367,8 @@ internal class SummaryIconView: NSView {
 
 extension Notification.Name {
     static let keepAwakeChanged = Notification.Name("keepAwakeChanged")
+    // a summary display option changed in Settings; icons resize right away
+    static let combinedSummaryLayoutChanged = Notification.Name("combinedSummaryLayoutChanged")
 }
 
 // Prevents idle sleep until turned off, like `caffeinate`/Amphetamine. While active, the summary
@@ -1375,7 +1437,7 @@ internal final class KeepAwake: NSObject, NSMenuDelegate {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
             item.autosaveName = "KeepAwake"
             item.button?.image = Glyph.bean.image(scale: 1.25)
-            item.button?.toolTip = localizedString("Keep Awake is on")
+            item.button?.setAccessibilityLabel(localizedString("Keep Awake is on")) // no hover text
             let menu = NSMenu()
             menu.delegate = self
             item.menu = menu
