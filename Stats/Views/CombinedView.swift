@@ -331,8 +331,9 @@ private class Popup: NSStackView, Popup_p {
         return group.modules.contains(m.name)
     }
     
+    // summary items' dropdowns are always compact; that's where their inline details live
     private var compactList: Bool {
-        Store.shared.bool(key: "CombinedModules_compact", defaultValue: false)
+        self.group != nil || Store.shared.bool(key: "CombinedModules_compact", defaultValue: false)
     }
     
     init() {

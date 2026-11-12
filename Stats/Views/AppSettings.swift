@@ -78,6 +78,24 @@ class ApplicationSettings: NSStackView {
     
     private var updateWindow: UpdateWindow?
     private let moduleSelector: ModuleSelectorView = ModuleSelectorView()
+    private var combinedIconSelect: NSPopUpButton? = nil
+    private var keepScreenSwitch: NSSwitch? = nil
+    
+    // Menu bar style for combined modules. Stored as the older icon switch plus icon key:
+    // widgets = icon off; summary = icon on with "ticks"; icon = icon on with any other key.
+    private var combinedModulesStyle: String {
+        if !self.combinedModulesIcon { return "widgets" }
+        return self.combinedModulesIconSymbol == "ticks" ? "summary" : "icon"
+    }
+    private static let combinedModulesStyles: [KeyValue_t] = [
+        KeyValue_t(key: "widgets", value: "Widgets"),
+        KeyValue_t(key: "summary", value: "Summary"),
+        KeyValue_t(key: "icon", value: "Icon")
+    ]
+    private static let combinedModulesClickActions: [KeyValue_t] = [
+        KeyValue_t(key: "list", value: "Combined list"),
+        KeyValue_t(key: "module", value: "Module details")
+    ]
     
     private var CPUeButton: NSButton?
     private var CPUpButton: NSButton?
@@ -138,39 +156,53 @@ class ApplicationSettings: NSStackView {
             ))
         ]))
         
-        self.combinedModulesView = PreferencesSection([
-            PreferencesRow(localizedString("Combined modules"), component: switchView(
-                action: #selector(self.toggleCombinedModules),
-                state: self.combinedModulesState
-            )),
-            PreferencesRow(localizedString("Show icon instead of widgets"), component: switchView(
-                action: #selector(self.toggleCombinedModulesIcon),
-                state: self.combinedModulesIcon
-            )),
-            PreferencesRow(localizedString("Icon"), component: selectView(
-                action: #selector(self.toggleCombinedModulesIconSymbol),
-                items: CombinedModulesIcons,
-                selected: self.combinedModulesIconSymbol
-            )),
-            PreferencesRow(component: self.moduleSelector),
-            PreferencesRow(localizedString("Spacing"), component: selectView(
-                action: #selector(self.toggleCombinedModulesSpacing),
-                items: CombinedModulesSpacings,
-                selected: self.combinedModulesSpacing
-            )),
-            PreferencesRow(localizedString("Separator"), component: switchView(
-                action: #selector(self.toggleCombinedModulesSeparator),
-                state: self.combinedModulesSeparator
-            )),
-            PreferencesRow(localizedString("Combined details"), component: switchView(
-                action: #selector(self.toggleCombinedModulesPopup),
-                state: self.combinedModulesPopup
-            )),
-            PreferencesRow(localizedString("Compact list"), component: switchView(
-                action: #selector(self.toggleCombinedModulesCompact),
-                state: self.combinedModulesCompact
-            ))
-        ])
+        let iconSelect = selectView(
+            action: #selector(self.toggleCombinedModulesIconSymbol),
+            items: CombinedModulesIcons.filter({ $0.key != "ticks" }), // Summary is a style of its own
+            selected: self.combinedModulesIconSymbol
+        )
+        self.combinedIconSelect = iconSelect
+        let keepScreen = switchView(action: #selector(self.toggleKeepScreenOn), state: KeepAwake.shared.keepScreenOn)
+        self.keepScreenSwitch = keepScreen
+        // the dropdown can change it too
+        NotificationCenter.default.addObserver(self, selector: #selector(self.syncKeepScreen), name: .keepAwakeChanged, object: nil)
+        // rows by index; updateCombinedModulesSettings() shows only the ones that apply
+        self.combinedModulesView = PreferencesSection(
+            title: localizedString("Combined modules"),
+            subtitle: localizedString("Show modules together in the menu bar instead of one item each"),
+            [
+                PreferencesRow(localizedString("Enabled"), component: switchView( // 0
+                    action: #selector(self.toggleCombinedModules),
+                    state: self.combinedModulesState
+                )),
+                PreferencesRow(localizedString("Menu bar style"), component: selectView( // 1
+                    action: #selector(self.toggleCombinedModulesStyle),
+                    items: ApplicationSettings.combinedModulesStyles,
+                    selected: self.combinedModulesStyle
+                )),
+                PreferencesRow(localizedString("Icon"), component: iconSelect), // 2
+                PreferencesRow(component: self.moduleSelector), // 3
+                PreferencesRow(localizedString("Spacing"), component: selectView( // 4
+                    action: #selector(self.toggleCombinedModulesSpacing),
+                    items: CombinedModulesSpacings,
+                    selected: self.combinedModulesSpacing
+                )),
+                PreferencesRow(localizedString("Separator"), component: switchView( // 5
+                    action: #selector(self.toggleCombinedModulesSeparator),
+                    state: self.combinedModulesSeparator
+                )),
+                PreferencesRow(localizedString("Clicking opens"), component: selectView( // 6
+                    action: #selector(self.toggleCombinedModulesClick),
+                    items: ApplicationSettings.combinedModulesClickActions,
+                    selected: self.combinedModulesPopup ? "list" : "module"
+                )),
+                PreferencesRow(localizedString("Compact list"), component: switchView( // 7
+                    action: #selector(self.toggleCombinedModulesCompact),
+                    state: self.combinedModulesCompact
+                )),
+                PreferencesRow(localizedString("Keep Awake keeps the screen on"), component: keepScreen) // 8
+            ]
+        )
         scrollView.stackView.addArrangedSubview(self.combinedModulesView!)
         self.updateCombinedModulesSettings()
         
@@ -399,20 +431,69 @@ class ApplicationSettings: NSStackView {
         NotificationCenter.default.post(name: .toggleOneView, object: nil, userInfo: nil)
     }
     
+    // Shows only the rows that do something for the chosen style:
+    // - Widgets: module order, spacing, separator, what a click opens, and the compact
+    //   list when a click opens the combined list
+    // - Summary: nothing extra; its dropdowns always use the compact layout
+    // - Icon: which icon, and the compact list (a click always opens the combined list)
     private func updateCombinedModulesSettings() {
-        self.combinedModulesView?.setRowVisibility(1, newState: self.combinedModulesState)
-        self.combinedModulesView?.setRowVisibility(2, newState: self.combinedModulesState && self.combinedModulesIcon)
-        for row in 3...6 {
-            self.combinedModulesView?.setRowVisibility(row, newState: self.combinedModulesState && !self.combinedModulesIcon)
-        }
-        // the compact list only matters when clicking opens the combined popup
-        self.combinedModulesView?.setRowVisibility(7, newState: self.combinedModulesState && (self.combinedModulesIcon || self.combinedModulesPopup))
+        let on = self.combinedModulesState
+        let style = self.combinedModulesStyle
+        let visible: [Int: Bool] = [
+            1: on,
+            2: on && style == "icon",
+            3: on && style == "widgets",
+            4: on && style == "widgets",
+            5: on && style == "widgets",
+            6: on && style == "widgets",
+            7: on && (style == "icon" || (style == "widgets" && self.combinedModulesPopup)),
+            8: on
+        ]
+        visible.forEach { self.combinedModulesView?.setRowVisibility($0.key, newState: $0.value) }
     }
     
-    @objc private func toggleCombinedModulesIcon(_ sender: NSButton) {
-        self.combinedModulesIcon = sender.state == NSControl.StateValue.on
+    @objc private func toggleCombinedModulesStyle(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String, key != self.combinedModulesStyle else { return }
+        switch key {
+        case "widgets":
+            self.combinedModulesIcon = false
+        case "summary":
+            self.combinedModulesIcon = true
+            self.combinedModulesIconSymbol = "ticks"
+        default:
+            self.combinedModulesIcon = true
+            if self.combinedModulesIconSymbol == "ticks" {
+                self.combinedModulesIconSymbol = "app"
+            }
+            self.selectCombinedIcon(self.combinedModulesIconSymbol)
+        }
         self.updateCombinedModulesSettings()
         NotificationCenter.default.post(name: .moduleRearrange, object: nil, userInfo: nil)
+        NotificationCenter.default.post(name: .combinedModulesPopup, object: nil, userInfo: nil)
+    }
+    
+    // marks the given icon as chosen in the Icon picker
+    private func selectCombinedIcon(_ key: String) {
+        guard let select = self.combinedIconSelect else { return }
+        select.itemArray.forEach { $0.state = ($0.representedObject as? String) == key ? .on : .off }
+        if let item = select.itemArray.first(where: { ($0.representedObject as? String) == key }) {
+            select.select(item)
+        }
+    }
+    
+    @objc private func toggleCombinedModulesClick(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        self.combinedModulesPopup = key == "list"
+        self.updateCombinedModulesSettings()
+        NotificationCenter.default.post(name: .combinedModulesPopup, object: nil, userInfo: nil)
+    }
+    
+    @objc private func toggleKeepScreenOn(_ sender: NSButton) {
+        KeepAwake.shared.keepScreenOn = sender.state == .on
+    }
+    
+    @objc private func syncKeepScreen() {
+        self.keepScreenSwitch?.state = KeepAwake.shared.keepScreenOn ? .on : .off
     }
     
     @objc private func toggleCombinedModulesSpacing(_ sender: NSMenuItem) {
@@ -424,12 +505,6 @@ class ApplicationSettings: NSStackView {
     @objc private func toggleCombinedModulesSeparator(_ sender: NSButton) {
         self.combinedModulesSeparator = sender.state == NSControl.StateValue.on
         NotificationCenter.default.post(name: .moduleRearrange, object: nil, userInfo: nil)
-    }
-    
-    @objc private func toggleCombinedModulesPopup(_ sender: NSButton) {
-        self.combinedModulesPopup = sender.state == NSControl.StateValue.on
-        self.updateCombinedModulesSettings()
-        NotificationCenter.default.post(name: .combinedModulesPopup, object: nil, userInfo: nil)
     }
     
     @objc private func toggleCombinedModulesIconSymbol(_ sender: NSMenuItem) {
