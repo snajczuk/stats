@@ -26,10 +26,6 @@ class ApplicationSettings: NSStackView {
         get { Store.shared.bool(key: "CombinedModules", defaultValue: false) }
         set { Store.shared.set(key: "CombinedModules", value: newValue) }
     }
-    private var combinedModulesIcon: Bool {
-        get { Store.shared.bool(key: "CombinedModules_icon", defaultValue: false) }
-        set { Store.shared.set(key: "CombinedModules_icon", value: newValue) }
-    }
     private var combinedModulesSpacing: String {
         get { Store.shared.string(key: "CombinedModules_spacing", defaultValue: "none") }
         set { Store.shared.set(key: "CombinedModules_spacing", value: newValue) }
@@ -80,18 +76,7 @@ class ApplicationSettings: NSStackView {
     private let moduleSelector: ModuleSelectorView = ModuleSelectorView()
     private var combinedIconSelect: NSPopUpButton? = nil
     private var keepScreenSwitch: NSSwitch? = nil
-    
-    // Menu bar style for combined modules. Stored as the older icon switch plus icon key:
-    // widgets = icon off; summary = icon on with "ticks"; icon = icon on with any other key.
-    private var combinedModulesStyle: String {
-        if !self.combinedModulesIcon { return "widgets" }
-        return self.combinedModulesIconSymbol == "ticks" ? "summary" : "icon"
-    }
-    private static let combinedModulesStyles: [KeyValue_t] = [
-        KeyValue_t(key: "widgets", value: "Widgets"),
-        KeyValue_t(key: "summary", value: "Summary"),
-        KeyValue_t(key: "icon", value: "Icon")
-    ]
+
     private static let combinedModulesClickActions: [KeyValue_t] = [
         KeyValue_t(key: "list", value: "Combined list"),
         KeyValue_t(key: "module", value: "Module details")
@@ -158,7 +143,7 @@ class ApplicationSettings: NSStackView {
         
         let iconSelect = selectView(
             action: #selector(self.toggleCombinedModulesIconSymbol),
-            items: CombinedModulesIcons.filter({ $0.key != "ticks" }), // Summary is a style of its own
+            items: CombinedModulesIcons,
             selected: self.combinedModulesIconSymbol
         )
         self.combinedIconSelect = iconSelect
@@ -175,10 +160,10 @@ class ApplicationSettings: NSStackView {
                     action: #selector(self.toggleCombinedModules),
                     state: self.combinedModulesState
                 )),
-                PreferencesRow(localizedString("Menu bar style"), component: selectView( // 1
+                PreferencesRow(localizedString("Menu bar"), component: selectView( // 1
                     action: #selector(self.toggleCombinedModulesStyle),
-                    items: ApplicationSettings.combinedModulesStyles,
-                    selected: self.combinedModulesStyle
+                    items: CombinedModulesWidget.all,
+                    selected: CombinedModulesWidget.current.rawValue
                 )),
                 PreferencesRow(localizedString("Icon"), component: iconSelect), // 2
                 PreferencesRow(component: self.moduleSelector), // 3
@@ -434,34 +419,31 @@ class ApplicationSettings: NSStackView {
     // Shows only the rows that do something for the chosen style:
     // - Widgets: module order, spacing, separator, what a click opens, and the compact
     //   list when a click opens the combined list
-    // - Summary: nothing extra; its dropdowns always use the compact layout
+    // - Summary items: nothing extra; their dropdowns always use the compact layout
     // - Icon: which icon, and the compact list (a click always opens the combined list)
+    // - Bars, rings, dial: the compact list (a click always opens the combined list)
     private func updateCombinedModulesSettings() {
         let on = self.combinedModulesState
-        let style = self.combinedModulesStyle
+        let style = CombinedModulesWidget.current
         let visible: [Int: Bool] = [
             1: on,
-            2: on && style == "icon",
-            3: on && style == "widgets",
-            4: on && style == "widgets",
-            5: on && style == "widgets",
-            6: on && style == "widgets",
-            7: on && (style == "icon" || (style == "widgets" && self.combinedModulesPopup)),
+            2: on && style == .icon,
+            3: on && style == .widgets,
+            4: on && style == .widgets,
+            5: on && style == .widgets,
+            6: on && style == .widgets,
+            7: on && (style == .icon || style.isSummaryWidget || (style == .widgets && self.combinedModulesPopup)),
             8: on
         ]
         visible.forEach { self.combinedModulesView?.setRowVisibility($0.key, newState: $0.value) }
     }
     
     @objc private func toggleCombinedModulesStyle(_ sender: NSMenuItem) {
-        guard let key = sender.representedObject as? String, key != self.combinedModulesStyle else { return }
-        switch key {
-        case "widgets":
-            self.combinedModulesIcon = false
-        case "summary":
-            self.combinedModulesIcon = true
-            self.combinedModulesIconSymbol = "ticks"
-        default:
-            self.combinedModulesIcon = true
+        guard let key = sender.representedObject as? String, let style = CombinedModulesWidget(rawValue: key),
+              style != CombinedModulesWidget.current else { return }
+        CombinedModulesWidget.current = style
+        if style == .icon {
+            // "ticks" was how the summary style used to be saved; it isn't a real icon
             if self.combinedModulesIconSymbol == "ticks" {
                 self.combinedModulesIconSymbol = "app"
             }

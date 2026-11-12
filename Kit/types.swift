@@ -81,7 +81,6 @@ public let CombinedModulesSpacings: [KeyValue_t] = [
 // key "app" is the Stats logo, every other key is an SF Symbol name
 public let CombinedModulesIcons: [KeyValue_t] = [
     KeyValue_t(key: "app", value: "Stats logo"),
-    KeyValue_t(key: "ticks", value: "Summary"),
     KeyValue_t(key: "switch.2", value: "Toggles"),
     KeyValue_t(key: "wifi", value: "Wi-Fi"),
     KeyValue_t(key: "gauge.with.dots.needle.67percent", value: "Gauge"),
@@ -499,4 +498,37 @@ public struct DeviceResponse: Codable {
     public let user_code: String
     public let verification_uri_complete: URL
     public let interval: Int?
+}
+
+public enum CombinedModulesWidget: String {
+    case widgets
+    case summary // one menu bar item per group: power, CPU and memory, network
+    case icon
+    case bars
+    case rings
+    case dial
+    
+    public static var all: [KeyValue_t] {
+        [
+            KeyValue_t(key: Self.widgets.rawValue, value: "Widgets"),
+            KeyValue_t(key: Self.summary.rawValue, value: "Summary items"),
+            KeyValue_t(key: Self.icon.rawValue, value: "App icon"),
+            KeyValue_t(key: Self.bars.rawValue, value: "Mini bars"),
+            KeyValue_t(key: Self.rings.rawValue, value: "Concentric rings"),
+            KeyValue_t(key: Self.dial.rawValue, value: "Arc dial")
+        ]
+    }
+    
+    public static var current: CombinedModulesWidget {
+        get {
+            // before this setting existed, "summary items" was saved as the icon "ticks"
+            let icon = Store.shared.bool(key: "CombinedModules_icon", defaultValue: false)
+            let ticks = Store.shared.string(key: "CombinedModules_iconSymbol", defaultValue: "app") == "ticks"
+            let fallback: CombinedModulesWidget = icon ? (ticks ? .summary : .icon) : .widgets
+            return CombinedModulesWidget(rawValue: Store.shared.string(key: "CombinedModules_display", defaultValue: fallback.rawValue)) ?? fallback
+        }
+        set { Store.shared.set(key: "CombinedModules_display", value: newValue.rawValue) }
+    }
+    
+    public var isSummaryWidget: Bool { self == .bars || self == .rings || self == .dial }
 }

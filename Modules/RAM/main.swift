@@ -169,6 +169,7 @@ public class RAM: Module {
         CombinedSummary.shared.update { $0.memory = .init(usage: value.usage, pressure: pressure) }
         self.notificationsView.loadCallback(value)
         self.previewView.loadCallback(value)
+        self.summaryCallback(value.usage)
         
         let total: Double = value.total == 0 ? 1 : value.total
         self.menuBar.widgets.filter{ $0.isActive }.forEach { (w: SWidget) in
