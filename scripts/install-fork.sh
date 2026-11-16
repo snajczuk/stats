@@ -76,5 +76,12 @@ if [[ -d "$DEST" ]]; then
     echo "Previous version moved to the Trash: $(basename "$OLD")"
 fi
 ditto "$APP" "$DEST"
-open "$DEST"
+# right after the swap, Launch Services can still point at the copy in the Trash and refuse
+# to open ("executable is missing"), so register the new one and retry briefly
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DEST"
+for attempt in {1..5}; do
+    open "$DEST" 2>/dev/null && break
+    [[ $attempt == 5 ]] && { echo "Installed $DEST, but it didn't launch. Open it from /Applications."; exit 1; }
+    sleep 1
+done
 echo "Installed and launched $DEST"
