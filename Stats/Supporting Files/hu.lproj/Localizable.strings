@@ -68,7 +68,6 @@
 "Cube" = "Kocka";
 "Logarithmic" = "Logaritmikus";
 "Fixed scale" = "Rögzített"; // gemma4:31b
-"Cores" = "Magok";
 "Core" = "Mag"; // gemma4:31b
 "Settings" = "Beállítások";
 "Name" = "Név";
@@ -167,7 +166,13 @@
 "Pause the Stats" = "Stats felfüggesztése";
 "Resume the Stats" = "Stats folytatása";
 "Combined modules" = "Egyesített modulok";
-"Show icon instead of widgets" = "Ikon megjelenítése widgetek helyett";
+"App icon" = "Alkalmazásikon";
+"Mini bars" = "Mini oszlopok";
+"Concentric rings" = "Koncentrikus gyűrűk";
+"Arc dial" = "Íves kijelző";
+"Menu bar" = "Menüsor";
+"Alternate details on click" = "Részletek váltása kattintáskor";
+"Hold Option or Shift, or both." = "Tartsa lenyomva az Option vagy a Shift billentyűt, vagy mindkettőt.";
 "Combined details" = "Kombinált részletek"; // gemma4:31b
 "Spacing" = "Helyköz";
 "Choose file" = "Fájl választása"; // gemma4:31b
@@ -204,6 +209,7 @@
 "Frame" = "Keret";
 "Value" = "Érték megjelenítése";
 "Colorize" = "Színezés";
+"Gradient fill" = "Színátmenetes kitöltés";
 "Colorize value" = "Érték színezése";
 "Additional information" = "További információk megjelenítése";
 "Base" = "Alap";
@@ -316,15 +322,14 @@
 "Status" = "Állapot";
 "Utilization" = "Felhasználás";
 "Renderer utilization" = "Render használat";
-"Renderer utilization history" = "Render kihasználtsági előzmények"; // qwen3.8:27b
 "Tiler utilization" = "Tiler használat";
-"Tiler utilization history" = "Tiler kihasználtsági előzmények"; // qwen3.8:27b
 "GPU usage threshold" = "GPU használati küszöb";
 "GPU usage is" = "%0 a GPU használat";
 "ANE utilization" = "ANE kihasználtság"; // qwen3.8:27b
 "ANE utilization history" = "ANE-kihasználtság-történet"; // qwen3.8:27b
 "FPS history" = "FPS előzmények"; // qwen3.8:27b
 "GPU utilization history" = "GPU kihasználtsági előzmények"; // qwen3.8:27b
+"Memory usage history" = "Memóriahasználati előzmények";
 
 // RAM
 "Memory usage" = "Memóriahasználat";
