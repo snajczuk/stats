@@ -12,6 +12,7 @@
 import Cocoa
 import Kit
 import SystemConfiguration
+import Network
 
 public enum Network_t: String, Codable {
     case wifi
@@ -152,6 +153,11 @@ public class Network: Module {
     
     private let ipUpdater = NSBackgroundActivityScheduler(identifier: "eu.exelban.Stats.Network.IP")
     
+    // macOS marks a connection to a personal hotspot (a phone sharing its data) as
+    // "expensive", so Wi-Fi + expensive means a hotspot
+    private let pathMonitor = NWPathMonitor()
+    private var onHotspot: Bool = false
+    
     private var widgetActivationThresholdState: Bool {
         Store.shared.bool(key: "\(self.config.name)_widgetActivationThresholdState", defaultValue: false)
     }
@@ -192,6 +198,10 @@ public class Network: Module {
         self.usageReader = UsageReader(.network) { [weak self] value in
             self?.usageCallback(value)
         }
+        self.pathMonitor.pathUpdateHandler = { [weak self] path in
+            self?.onHotspot = path.status == .satisfied && path.isExpensive && path.usesInterfaceType(.wifi)
+        }
+        self.pathMonitor.start(queue: DispatchQueue(label: "eu.exelban.Stats.Network.path"))
         self.inlineView.locationPermissionAction = { [weak self] in
             self?.popupView.locationPermissionAction?()
         }
@@ -369,7 +379,7 @@ public class Network: Module {
         var symbol: String? = "network"
         switch value.connectionType {
         case .wifi:
-            symbol = "wifi"
+            symbol = self.onHotspot ? "personalhotspot" : "wifi"
             subtitle = value.wifiDetails.ssid ?? localizedString("Wi-Fi")
         case .ethernet:
             symbol = nil // drawn glyph below
@@ -383,7 +393,8 @@ public class Network: Module {
         
         let network = CombinedSummary.Network(upload: value.bandwidth.upload, download: value.bandwidth.download,
                                               connected: value.status, wifi: value.connectionType == .wifi,
-                                              rssi: value.wifiDetails.RSSI)
+                                              rssi: value.wifiDetails.RSSI,
+                                              hotspot: value.connectionType == .wifi && self.onHotspot)
         if value.status && symbol == nil {
             self.compact.setIcon(glyph: .ethernet, active: true)
         } else {

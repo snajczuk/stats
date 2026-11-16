@@ -1101,7 +1101,7 @@ internal class SummaryIconView: NSView {
             key += "m\(values.memory?.pressure ?? 0)|"
         }
         if self.shows(.network, "Network"), let n = values.network {
-            key += "n\(n.connected),\(n.wifi),\(self.showsWifiStrength ? n.wifiStrength : 1),"
+            key += "n\(n.connected),\(n.wifi),\(n.hotspot),\(self.showsWifiStrength ? n.wifiStrength : 1),"
             key += self.showsNetworkDots ? "\(SummaryIconView.litDots(n.upload)),\(SummaryIconView.litDots(n.download))|" : "-|"
         }
         return key
@@ -1295,6 +1295,9 @@ internal class SummaryIconView: NSView {
                 x += self.symbol("wifi.slash", pointSize: self.wifiPointSize, lift: self.wifiLift, x: x, draw: draw)
             } else if let net, !net.wifi {
                 x += self.glyph(.ethernet, x: x, draw: draw)
+            } else if let net, net.hotspot {
+                // the chain link, like the system shows for a personal hotspot
+                x += self.symbol("personalhotspot", pointSize: self.wifiPointSize, lift: self.wifiLift, x: x, draw: draw)
             } else {
                 x += self.symbol("wifi", variableValue: self.showsWifiStrength ? (net?.wifiStrength ?? 1) : 1, pointSize: self.wifiPointSize, lift: self.wifiLift, x: x, draw: draw)
             }

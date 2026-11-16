@@ -368,8 +368,10 @@ public final class CombinedSummary {
         public var connected: Bool
         public var wifi: Bool
         public var rssi: Int? // Wi-Fi signal in dBm, nil when unknown
-        public init(upload: Int64, download: Int64, connected: Bool, wifi: Bool, rssi: Int? = nil) {
+        public var hotspot: Bool // Wi-Fi to a personal hotspot, shown with the chain-link icon
+        public init(upload: Int64, download: Int64, connected: Bool, wifi: Bool, rssi: Int? = nil, hotspot: Bool = false) {
             self.upload = upload; self.download = download; self.connected = connected; self.wifi = wifi; self.rssi = rssi
+            self.hotspot = hotspot
         }
         
         // how many of the 3 Wi-Fi bars to light, as 0...1, using the usual dBm cutoffs
