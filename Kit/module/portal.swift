@@ -251,9 +251,16 @@ public class CompactPortalRow: NSView {
     }
     
     // Changes the icon. `active` fills the circle with the accent color, like a connected Wi-Fi.
-    public func setIcon(symbol: String?, active: Bool = false) {
-        self.setIcon(key: symbol.map { "symbol:\($0)" }, active: active) {
-            symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
+    // `variableValue` (0...1) lights part of a symbol that supports it, like the Wi-Fi bars.
+    public func setIcon(symbol: String?, variableValue: Double? = nil, active: Bool = false) {
+        let key = symbol.map { name in variableValue.map { "symbol:\(name)@\($0)" } ?? "symbol:\(name)" }
+        self.setIcon(key: key, active: active) {
+            symbol.flatMap { name in
+                if let v = variableValue, #available(macOS 13.0, *) {
+                    return NSImage(systemSymbolName: name, variableValue: v, accessibilityDescription: nil)
+                }
+                return NSImage(systemSymbolName: name, accessibilityDescription: nil)
+            }
         }
     }
     

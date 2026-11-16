@@ -704,6 +704,21 @@ private class Popup: NSStackView, Popup_p {
             view.setCustomSpacing(6, after: separator2)
             h += KeepAwakeRow.height + KeepScreenRow.height + 6 + 1 + 6
         }
+        // the Network dropdown also links to Wi-Fi settings, like the system Wi-Fi menu
+        if self.group == .network {
+            view.addArrangedSubview(MenuTextRow(localizedString("Wi-Fi Settings…")) { [weak self] in
+                self?.window?.setIsVisible(false)
+                // Wi-Fi has its own page on macOS 13+; before that it lived under Network
+                var address = "x-apple.systempreferences:com.apple.preference.network"
+                if #available(macOS 13.0, *) {
+                    address = "x-apple.systempreferences:com.apple.wifi-settings-extension"
+                }
+                if let url = URL(string: address) {
+                    NSWorkspace.shared.open(url)
+                }
+            })
+            h += MenuTextRow.height
+        }
         view.addArrangedSubview(settings)
         view.addArrangedSubview(activity)
 

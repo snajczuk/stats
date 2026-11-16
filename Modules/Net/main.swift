@@ -381,17 +381,18 @@ public class Network: Module {
         }
         if !value.status { subtitle = localizedString("Not connected") }
         
+        let network = CombinedSummary.Network(upload: value.bandwidth.upload, download: value.bandwidth.download,
+                                              connected: value.status, wifi: value.connectionType == .wifi,
+                                              rssi: value.wifiDetails.RSSI)
         if value.status && symbol == nil {
             self.compact.setIcon(glyph: .ethernet, active: true)
         } else {
-            self.compact.setIcon(symbol: symbol ?? "network", active: value.status)
+            // light only as many bars as the signal earns, like the menu bar icon
+            let bars = symbol == "wifi" && network.rssi != nil ? network.wifiStrength : nil
+            self.compact.setIcon(symbol: symbol ?? "network", variableValue: bars, active: value.status)
         }
         self.compact.setValue("↓\(down) ↑\(up)", subtitle: subtitle)
-        CombinedSummary.shared.update {
-            $0.network = .init(upload: value.bandwidth.upload, download: value.bandwidth.download,
-                               connected: value.status, wifi: value.connectionType == .wifi,
-                               rssi: value.wifiDetails.RSSI)
-        }
+        CombinedSummary.shared.update { $0.network = network }
     }
     
     private func connectivityCallback(_ raw: Network_Connectivity?) {
