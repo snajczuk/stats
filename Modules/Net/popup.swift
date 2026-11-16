@@ -92,6 +92,10 @@ internal class Popup: PopupWrapper {
     // inline (combined dropdown) only
     private var inline: Bool = false
     private var inlineWifiRows: [NSView] = []
+    // macOS only gives the Wi-Fi network name to apps with Location Services access;
+    // this row asks for it when it's missing
+    private var inlineAccessField: ValueField? = nil
+    private var inlineAccessRow: NSView? = nil
     private var inlineInterfaceField: NSTextField? = nil
     private var inlineWifiField: NSTextField? = nil
     private var inlineSignalField: NSTextField? = nil
@@ -438,6 +442,13 @@ internal class Popup: PopupWrapper {
         interface.1.lineBreakMode = .byTruncatingTail // "…" rather than cut off if it's ever too long
         self.inlineInterfaceField = interface.1
         self.inlineInterfaceRow = interface.2
+        let access = popupRow(view, title: "\(localizedString("Network")):", value: "")
+        access.1.textColor = .controlAccentColor
+        access.2.toolTip = localizedString("macOS shows the network name only to apps with Location Services access")
+        access.2.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(self.requestLocationPermission)))
+        access.2.isHidden = true
+        self.inlineAccessField = access.1
+        self.inlineAccessRow = access.2
         let wifi = popupRow(view, title: "\(localizedString("Wi-Fi")):", value: localizedString("Unknown"))
         let signal = popupRow(view, title: "\(localizedString("Signal")):", value: localizedString("Unknown"))
         self.inlineWifiField = wifi.1
@@ -540,6 +551,12 @@ internal class Popup: PopupWrapper {
         for (row, field) in zip(self.inlineWifiRows, [self.inlineWifiField, self.inlineSignalField]) {
             resized = self.setRow(row, hidden: !wifi || isUnknownValue(field?.stringValue ?? "")) || resized
         }
+        let auth = value.wifiLocationAuthorization
+        let accessRequired = wifi && (auth == .notDetermined || auth == .denied)
+        if accessRequired {
+            self.inlineAccessField?.stringValue = localizedString(auth == .notDetermined ? "Allow access to show name" : "Open Location Settings")
+        }
+        resized = self.setRow(self.inlineAccessRow, hidden: !accessRequired) || resized
         resized = self.setRow(self.inlineInterfaceRow, hidden: isUnknownValue(self.inlineInterfaceField?.stringValue ?? "")) || resized
         resized = self.setRow(self.localIPView, hidden: isUnknownValue(self.localIPField?.stringValue ?? "")) || resized
         
@@ -606,8 +623,13 @@ internal class Popup: PopupWrapper {
         self.publicIPv6Field?.isSelectable = true
         
         if let valueView = self.publicIPv6Field {
-            valueView.font = NSFont.systemFont(ofSize: 7, weight: .semibold)
-            valueView.setFrameOrigin(NSPoint(x: valueView.frame.origin.x, y: -1))
+            if self.inline {
+                // full size, with the middle cut to "…" when it doesn't fit; clicking still copies all of it
+                valueView.lineBreakMode = .byTruncatingMiddle
+            } else {
+                valueView.font = NSFont.systemFont(ofSize: 7, weight: .semibold)
+                valueView.setFrameOrigin(NSPoint(x: valueView.frame.origin.x, y: -1))
+            }
         }
         
         ipV4.2.removeFromSuperview()
@@ -820,6 +842,9 @@ internal class Popup: PopupWrapper {
                         ip += " (\(cc))"
                     }
                     self.publicIPv6Field?.toolTip = cc
+                }
+                if self.inline {
+                    self.publicIPv6Field?.toolTip = addr
                 }
                 if self.publicIPv6Field?.stringValue != ip && self.canWrite(self.publicIPv6Field) {
                     self.publicIPv6Field?.stringValue = ip
