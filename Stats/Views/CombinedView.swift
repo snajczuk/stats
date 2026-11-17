@@ -1227,12 +1227,17 @@ internal class SummaryIconView: NSView {
             let w: CGFloat = 28, h: CGFloat = 9
             if draw {
                 let rect = NSRect(x: x, y: midY - h/2, width: w, height: h)
+                let pill = NSBezierPath(roundedRect: rect, xRadius: h/2, yRadius: h/2)
                 self.track.setFill()
-                NSBezierPath(roundedRect: rect, xRadius: h/2, yRadius: h/2).fill()
+                pill.fill()
                 if level > 0 {
+                    // a plain bar clipped to the pill, so low levels are a thin sliver along the
+                    // rounded left end rather than a full circle (which alone is a third of the bar)
+                    NSGraphicsContext.saveGraphicsState()
+                    pill.addClip()
                     color.setFill()
-                    let fill = NSRect(x: x, y: rect.minY, width: max(h, w * level), height: h)
-                    NSBezierPath(roundedRect: fill, xRadius: h/2, yRadius: h/2).fill()
+                    NSRect(x: x, y: rect.minY, width: max(1.5, w * level), height: h).fill()
+                    NSGraphicsContext.restoreGraphicsState()
                 }
                 if plugged {
                     // bolt while charging; plug when on power but not charging (full, or on hold)
